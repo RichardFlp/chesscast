@@ -1,0 +1,8 @@
+tools/
+src/debug/
+build/
+dist/
+node_modules/
+.wrangler/
+__pycache__/
+*.pyc

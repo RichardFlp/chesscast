@@ -1,0 +1,1 @@
+{"name":"chessplus-relay","private":true,"scripts":{"dev":"wrangler dev","deploy":"wrangler deploy"},"dependencies":{"partyserver":"^0.5.10","wrangler":"^4.163.0"}}

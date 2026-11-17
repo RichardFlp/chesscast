@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en-us">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1">
+<title>ChessCast</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #112E81; }
+  body { display: flex; align-items: center; justify-content: center; }
+
+  #canvas, #loading { display: block; border: 0; padding: 0; width: min(100vw, calc(100vh * 16 / 9)); height: min(100vh, calc(100vw * 9 / 16)); }
+  #canvas { visibility: hidden; position: absolute; outline: none; }
+  #loading { background: #112E81; }
+</style>
+</head>
+<body>
+<canvas id="loading" width="800" height="450"></canvas>
+<canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+<script>
+  var lc = document.getElementById('loading').getContext('2d');
+  function drawLoading(text) {
+    var w = 800, h = 450;
+    lc.fillStyle = '#112E81'; lc.fillRect(0, 0, w, h);
+    lc.fillStyle = '#4647AE'; lc.fillRect(250, 236, 300, 16);
+    var m = /\((\d+)\/(\d+)\)/.exec(text || '');
+    if (m && +m[2] > 0) { lc.fillStyle = '#AACCD6'; lc.fillRect(250, 236, 300 * m[1] / m[2], 16); }
+    lc.fillStyle = '#AACCD6'; lc.font = 'bold 44px monospace'; lc.textAlign = 'center';
+    lc.fillText('CHESSCAST', w / 2, 200);
+    lc.fillStyle = '#4382DF'; lc.font = '18px monospace';
+    lc.fillText((text || '').toUpperCase(), w / 2, 290);
+  }
+  function focusGame() { window.focus(); document.getElementById('canvas').focus(); }
+  window.onload = focusGame;
+  window.addEventListener('mousedown', focusGame);
+  window.addEventListener('keydown', function (e) {
+    if ([32, 37, 38, 39, 40].indexOf(e.keyCode) > -1) e.preventDefault();
+  }, false);
+
+  var NET_SERVER = '';
+  var net = { dir: null, links: {} };
+  function toHex(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+    return s;
+  }
+  function fromHex(h) {
+    var b = new Uint8Array(h.length / 2);
+    for (var i = 0; i < b.length; i++) b[i] = parseInt(h.substr(i * 2, 2), 16);
+    return b;
+  }
+  function netWrite(name, text) {
+    if (!net.dir) return;
+    try { Module.FS_unlink(net.dir + '/' + name); } catch (e) {}
+    try { Module.FS_createDataFile(net.dir, name, text, true, true); } catch (e) { console.error('net write', e); }
+  }
+  function netEvent(link, text) { link.seq++; netWrite('net_' + link.id + '_' + link.seq + '.txt', text); }
+  function netOpen(id, url, text) {
+    var link = { id: id, seq: 0, ws: null, closed: false, text: !!text };
+    net.links[id] = link;
+    var q = new URLSearchParams(location.search).get('server');
+    if (text) { if (q) url = q.replace(/\/?$/, '/') + url.split('/').pop(); }
+    else url = q || NET_SERVER || url;
+    if (location.protocol === 'https:' && url.indexOf('ws://') === 0) {
+      netEvent(link, 'closed ONLINE NEEDS A SECURE SERVER (WSS)');
+      return;
+    }
+    try { link.ws = new WebSocket(url); } catch (e) {
+      netEvent(link, 'closed CANNOT REACH SERVER'); return;
+    }
+    link.ws.binaryType = 'arraybuffer';
+    link.ws.onopen = function () {
+      netEvent(link, 'open');
+      if (link.text) link.beat = setInterval(function () {
+        if (link.ws && link.ws.readyState === 1) link.ws.send('.');
+      }, 15000);
+    };
+    link.ws.onmessage = function (e) {
+      if (typeof e.data === 'string') {
+        if (link.text) netEvent(link, 'data ' + toHex(new TextEncoder().encode(e.data)));
+        return;
+      }
+      netEvent(link, 'data ' + toHex(new Uint8Array(e.data)));
+    };
+    link.ws.onclose = function () {
+      clearInterval(link.beat);
+      if (!link.closed) { link.closed = true; netEvent(link, 'closed SERVER CLOSED THE CONNECTION'); }
+    };
+    link.ws.onerror = function () {
+      if (!link.closed) { link.closed = true; netEvent(link, 'closed CANNOT REACH SERVER'); }
+    };
+  }
+  function netCommand(line) {
+    var a = line.split(' '), cmd = a[0], id = a[1], link = net.links[id];
+    if (cmd === 'init') net.dir = a[2];
+    else if (cmd === 'open') { net.dir = a[2]; netOpen(id, a[3], a[4] === 'text'); }
+    else if (cmd === 'send' && link && link.ws && link.ws.readyState === 1) link.ws.send(link.text ? new TextDecoder().decode(fromHex(a[2])) : fromHex(a[2]));
+    else if (cmd === 'close' && link) {
+      link.closed = true;
+      clearInterval(link.beat);
+      if (link.ws) try { link.ws.close(); } catch (e) {}
+      delete net.links[id];
+    } else if (cmd === 'copy') {
+      var text = new TextDecoder().decode(fromHex(a[2]));
+      if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function () {});
+    }
+  }
+  window.addEventListener('paste', function (e) {
+    var t = (e.clipboardData || window.clipboardData).getData('text');
+    if (t) netWrite('net_paste.txt', toHex(new TextEncoder().encode(t)));
+  });
+
+  var Module = {
+    arguments: ['./game.love'],
+    INITIAL_MEMORY: 134217728,
+    print: function (s) {
+      if (s.indexOf('@@CPNET ') === 0) netCommand(s.substr(8));
+      else console.log(s);
+    },
+    printErr: console.error.bind(console),
+    canvas: (function () {
+      var c = document.getElementById('canvas');
+      c.addEventListener('webglcontextlost', function (e) { drawLoading('Graphics reset: reload the page'); e.preventDefault(); }, false);
+      return c;
+    })(),
+    setStatus: function (text) {
+      if (text) drawLoading(text);
+      else if (Module.remainingDependencies === 0) {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('canvas').style.visibility = 'visible';
+      }
+    },
+    totalDependencies: 0,
+    remainingDependencies: 0,
+    monitorRunDependencies: function (left) {
+      this.remainingDependencies = left;
+      this.totalDependencies = Math.max(this.totalDependencies, left);
+      Module.setStatus(left ? 'Loading (' + (this.totalDependencies - left) + '/' + this.totalDependencies + ')' : 'Starting');
+    }
+  };
+  Module.setStatus('Downloading');
+  window.onerror = function () {
+    drawLoading('Something went wrong: reload the page');
+    document.getElementById('loading').style.display = 'block';
+  };
+  function applicationLoad() { Love(Module); }
+</script>
+<script src="game.js"></script>
+<script async src="love.js" onload="applicationLoad(this)"></script>
+</body>
+</html>
