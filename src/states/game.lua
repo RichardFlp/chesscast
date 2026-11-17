@@ -55,6 +55,7 @@ function Game:enter(p)
     local match = Match.new(p)
     self.match = match
     self.difficulty = p.difficulty or 2
+    self.ai = Search.level(p.ai or self.difficulty)
     local cpuMode = match.mode == "cpu"
     self.online = match.mode == "online"
     local bottom = match.mode ~= "local" and match.human or 1
@@ -69,7 +70,7 @@ function Game:enter(p)
     })
     self.view.onMove = function(m) self:applyMove(m) end
 
-    local level = Search.LEVELS[self.difficulty]
+    local level = self.ai
     self.left = Sidebar.new {
         x = 36, side = bottom, match = match, name = botName,
         sub = bottom == 1 and "WHITE PIECES" or "BLACK PIECES", showHistory = true,
@@ -430,7 +431,7 @@ function Game:updateCPU(dt)
     if not self.job then
 
         if self.spells and self.spells:cpuTurn(side) then return end
-        self.job = Search.start(match.board, self.difficulty)
+        self.job = Search.start(match.board, self.ai)
     end
     local done = self.job:step(STEP_BUDGET)
     if done and self.thinkT >= MIN_THINK * App.animScale() and not self.view:busy() then

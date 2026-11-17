@@ -138,6 +138,7 @@ function Board.fromFEN(fen)
         b.ep = sq(parts[4]:byte(1) - 97, tonumber(parts[4]:sub(2)) - 1)
     end
     b.half = tonumber(parts[5] or "0") or 0
+    b.ply = math.max(0, ((tonumber(parts[6] or "1") or 1) - 1) * 2) + (b.side == -1 and 1 or 0)
     for _, s in ipairs({ sq(4, 0), sq(7, 0), sq(0, 0), sq(4, 7), sq(7, 7), sq(0, 7) }) do
         b.castleIds[s] = b.id[s]
     end

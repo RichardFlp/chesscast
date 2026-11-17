@@ -15,10 +15,15 @@ local evaluate = Eval.evaluate
 local now = (love and love.timer and love.timer.getTime) or os.clock
 
 Search.LEVELS = {
-    { name = "EASY", depth = 2, time = 0.5, noise = 120, blunder = 0.15 },
-    { name = "MEDIUM", depth = 3, time = 1.2, noise = 12, blunder = 0 },
-    { name = "HARD", depth = 6, time = 2.6, noise = 0, blunder = 0 },
+    { name = "EASY", depth = 1, qs = false, time = 0.3, noise = 220, blunder = 0.35, cast = 0.25, spellNoise = 300, spellDepth = 0 },
+    { name = "MEDIUM", depth = 2, qs = false, time = 0.6, noise = 90, blunder = 0.12, cast = 0.5, spellNoise = 120, spellDepth = 0 },
+    { name = "HARD", depth = 3, qs = true, time = 1.2, noise = 25, blunder = 0.04, cast = 0.8, spellNoise = 40, spellDepth = 1 },
 }
+
+function Search.level(l)
+    if type(l) == "table" then return l end
+    return Search.LEVELS[l] or Search.LEVELS[2]
+end
 
 local Job = {}
 Job.__index = Job
@@ -124,7 +129,10 @@ local function negamax(S, b, depth, alpha, beta, ply)
     local side = b.side
     local inCheck = b:inCheck(side)
     if inCheck and ply < MAXPLY - 8 then depth = depth + 1 end
-    if depth <= 0 then return quiesce(S, b, alpha, beta, ply) end
+    if depth <= 0 then
+        if S.level.qs == false then return evaluate(b) * side end
+        return quiesce(S, b, alpha, beta, ply)
+    end
 
     if alpha < -MATE + ply then alpha = -MATE + ply end
     if beta > MATE - ply then beta = MATE - ply end
@@ -173,7 +181,7 @@ local function searchRoot(S, depth, rootMoves, rootScores)
     local b = S.b
     local alpha = -INF
     local bestScore, bestMove = -INF, nil
-    local exact = S.level.noise > 0
+    local exact = (S.level.noise or 0) > 0
     for i = 1, #rootMoves do
         local m = rootMoves[i]
         b:make(m)
@@ -224,7 +232,7 @@ function Job:run()
         if abs(sc) > MATE - 100 then break end
     end
 
-    if L.noise > 0 and lastScores then
+    if (L.noise or 0) > 0 and lastScores then
         local best, bm = -INF, self.move
         for i = 1, n do
             local sc = lastScores[i]
@@ -233,16 +241,15 @@ function Job:run()
         end
         self.move = bm
         if L.blunder > 0 and random() < L.blunder and n > 1 then
-
-            local k = random(math.max(1, math.floor(n / 2)))
+            local k = random(n)
             if lastScores[k] > -MATE + 100 then self.move = rootMoves[k] end
         end
     end
     self.done = true
 end
 
-function Search.start(board, levelIndex)
-    local S = newState(board:clone(), Search.LEVELS[levelIndex] or Search.LEVELS[2])
+function Search.start(board, level)
+    local S = newState(board:clone(), Search.level(level))
     S.startTime = now()
     S.deadline = S.startTime + S.level.time
     S.coroutine = true
@@ -261,15 +268,15 @@ function Job:step(budget)
     return self.done
 end
 
-function Search.best(board, levelIndex, timeLimit)
-    local S = newState(board:clone(), Search.LEVELS[levelIndex] or Search.LEVELS[2])
+function Search.best(board, level, timeLimit)
+    local S = newState(board:clone(), Search.level(level))
     S.deadline = now() + (timeLimit or S.level.time)
     S:run()
     return S.move, S.score, S.depth, S.nodes
 end
 
-function Search.score(board, depth, timeLimit, yielding)
-    local S = newState(board, { depth = depth, noise = 0, blunder = 0 })
+function Search.score(board, depth, timeLimit, yielding, qs)
+    local S = newState(board, { depth = depth, noise = 0, blunder = 0, qs = qs })
     S.deadline = now() + (timeLimit or 1)
     if yielding then S.coroutine, S.frameEnd = true, -1 end
     local sc = negamax(S, board, depth, -INF, INF, 0)

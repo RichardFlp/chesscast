@@ -71,7 +71,8 @@ end
 function Layer.new(game)
     local L = setmetatable({}, Layer)
     L.game, L.match, L.view = game, game.match, game.view
-    L.manaOf = { [1] = 0, [-1] = 0 }
+    local m0 = game.match.opts.mana or 0
+    L.manaOf = { [1] = m0, [-1] = m0 }
     L.hand = { [1] = {}, [-1] = {} }
     L.deck = { [1] = {}, [-1] = {} }
     L.discard = { [1] = {}, [-1] = {} }
@@ -471,15 +472,15 @@ local function sample(list, n)
 end
 
 function Layer:cpuDecide(side)
-    local level = self.game.difficulty or 2
+    local L = self.game.ai or Search.level(2)
     local b = self.match.board
-    if level == 1 and random() > 0.35 then return nil end
+    if random() > (L.cast or 1) then return nil end
     if self.ward[-side] > b.ply then return nil end
-    local depth = level == 1 and 0 or (level == 2 and 1 or 2)
+    local depth, qs, noise = L.spellDepth or 1, L.qs, L.spellNoise or 0
     local ctx = self:ctxFor(side)
     ctx = { snapshot = ctx.snapshot, hist = ctx.hist }
     local t0 = now()
-    local base, _, stop = Search.score(b:clone(), depth, 0.6, true)
+    local base, _, stop = Search.score(b:clone(), depth, 0.6, true, qs)
     if stop then return nil end
     local best, bestGain, bestA, bestC = nil, -math.huge, nil, nil
     local evals = 0
@@ -492,10 +493,10 @@ function Layer:cpuDecide(side)
         local ok, nb = S.check(b, side, def, a, c, ctx)
         if not ok then return end
         evals = evals + 1
-        local sc, _, st = Search.score(nb, depth, 0.5, true)
+        local sc, _, st = Search.score(nb, depth, 0.5, true, qs)
         if st then return end
         local gain = (def.endsTurn and -sc or sc) - base + (def.aiBonus or 0)
-        if level == 1 then gain = gain + (random() - 0.5) * 120 end
+        gain = gain + (random() * 2 - 1) * noise
         if gain > bestGain then best, bestGain, bestA, bestC = cv, gain, a, c end
         coroutine.yield()
     end

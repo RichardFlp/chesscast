@@ -15,35 +15,36 @@ function T.run(log)
         if not cond then ok = false end
     end
     log("AI tests")
+    local SHARP = { depth = 4, qs = true, time = 2, noise = 0, blunder = 0 }
 
     local b = Board.fromFEN("6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1")
-    local m = Search.best(b, 3, 2)
+    local m = Search.best(b, SHARP, 2)
     check("mate in one (Rd8#)", moveName(m) == "d1d8", moveName(m))
 
     b = Board.fromFEN("3r2k1/8/8/8/8/8/5PPP/6K1 b - - 0 1")
-    m = Search.best(b, 3, 2)
+    m = Search.best(b, SHARP, 2)
     check("mate in one for black (Rd1#)", moveName(m) == "d8d1", moveName(m))
 
     b = Board.fromFEN("4k3/8/8/3q4/8/8/3R4/4K3 w - - 0 1")
-    m = Search.best(b, 2, 2)
+    m = Search.best(b, SHARP, 2)
     check("takes a hanging queen", moveName(m) == "d2d5", moveName(m))
 
     b = Board.fromFEN("4k3/8/2p5/3p4/8/8/8/3QK3 w - - 0 1")
-    m = Search.best(b, 3, 2)
+    m = Search.best(b, SHARP, 2)
     check("avoids a defended pawn with the queen", moveName(m) ~= "d1d5", moveName(m))
 
     b = Board.fromFEN("4k3/8/8/3q4/8/8/3R4/4K3 w - - 0 1")
     b:setStatus(b.id[Board.sq(3, 4)], "shield", b.ply + 4)
-    m = Search.best(b, 3, 2)
+    m = Search.best(b, SHARP, 2)
     check("respects a shield", moveName(m) ~= "d2d5", moveName(m))
 
     b = Board.fromFEN("6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1")
     b:setStatus(b.id[Board.sq(3, 0)], "frozen", b.ply + 2)
-    m = Search.best(b, 3, 2)
+    m = Search.best(b, SHARP, 2)
     check("frozen rook does not move", Board.from(m) ~= Board.sq(3, 0), moveName(m))
 
     b = Board.fromFEN("7k/8/6K1/8/8/8/8/5Q2 w - - 0 1")
-    m = Search.best(b, 3, 2)
+    m = Search.best(b, SHARP, 2)
     local c = b:clone()
     c:play(m)
     local mated = c:inCheck(c.side) and not c:hasLegalMove()
@@ -68,7 +69,7 @@ function T.run(log)
     local dt = os.clock() - t0
     check("start position depth 4", true, string.format("%d nodes, %.2fs, %d knps", nodes, dt, nodes / math.max(dt, 1e-3) / 1000))
 
-    local job = Search.start(Board.new(), 3)
+    local job = Search.start(Board.new(), SHARP)
     local steps = 0
     while not job:step(0.004) do steps = steps + 1; if steps > 100000 then break end end
     check("coroutine search completes", job.move ~= nil, string.format("%d yields, depth %d", steps, job.depth or 0))

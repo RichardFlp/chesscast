@@ -114,6 +114,7 @@ function C:play(i)
     local lv = Levels.flat[i]
     M.switch("game", {
         mode = "cpu", human = lv.human, difficulty = lv.difficulty, spells = true, clock = 0,
+        fen = lv.fen, ai = lv.ai, mana = 1,
         names = { [-lv.human] = lv.name }, campaign = i,
         tutorial = (i == 1 and App.settings.tutorial) or nil,
     })
