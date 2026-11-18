@@ -4,7 +4,7 @@ local socket = require("socket")
 local bit = require("bit")
 
 local MAX_FRAME = 64 * 1024
-local BEAT = 15
+local BEAT = 3
 local now = love.timer.getTime
 
 local function fail(msg, sock)
@@ -95,7 +95,7 @@ while true do
         if send(1, msg) then return fail("CONNECTION LOST", sock) end
         msg = outbox:pop()
     end
-    if now() - lastSend > BEAT and send(1, ".") then return fail("CONNECTION LOST", sock) end
+    if now() - lastSend > BEAT and send(1, "I\nHB") then return fail("CONNECTION LOST", sock) end
 
     local data, rerr, partial = sock:receive(8192)
     local chunk = data or partial

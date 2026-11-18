@@ -113,14 +113,20 @@ function Session:poll()
             end
         else
             local m, e = self.codec.decode(v)
-            if m then
+            if m and (m.t == "peer_input" or m.t == "state" or m.t == "peer_joined") then
+                self.heard = love.timer.getTime()
+            end
+            if m and m.t == "peer_input" and m.blob == "HB" then
+                m = nil
+                e = nil
+            elseif m then
                 if m.t == "joined" then
                     self.code = m.code
                     self.peer = m.peer
                     self.hostPeer = m.host
                 end
                 if m.t ~= "pong" and m.t ~= "move_ok" then return m end
-            else
+            elseif e then
                 print("roomie decode error: " .. tostring(e))
             end
         end

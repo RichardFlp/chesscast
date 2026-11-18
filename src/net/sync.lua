@@ -33,6 +33,7 @@ function Sync.new(game, session, role, lines)
     s.known = 1
     s.queue, s.qi, s.qn = {}, 1, 0
     s.header = lines[1]
+    if session then session.heard = love.timer.getTime() end
     if role == "guest" then s:merge(lines) else s.known = #lines end
     return s
 end
@@ -140,11 +141,24 @@ function Sync:apply(a)
     return false
 end
 
+Sync.WARN_AFTER = 6
+Sync.DROP_AFTER = 30
+
+function Sync:silence()
+    local s = self.session
+    if not (s and s.heard) then return 0 end
+    return love.timer.getTime() - s.heard
+end
+
 function Sync:update()
     while self.session do
         local m = self.session:poll()
         if not m then break end
         self:onMessage(m)
+    end
+    if self.session and self:silence() > Sync.DROP_AFTER then
+        self.game:netEnded("OPPONENT DISCONNECTED")
+        return
     end
     if self.over then return end
     local q = self.queue

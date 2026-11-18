@@ -71,8 +71,8 @@
     link.ws.onopen = function () {
       netEvent(link, 'open');
       if (link.text) link.beat = setInterval(function () {
-        if (link.ws && link.ws.readyState === 1) link.ws.send('.');
-      }, 15000);
+        if (link.ws && link.ws.readyState === 1) link.ws.send('I\nHB');
+      }, 3000);
     };
     link.ws.onmessage = function (e) {
       if (typeof e.data === 'string') {

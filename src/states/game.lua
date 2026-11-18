@@ -23,7 +23,7 @@ local Online = require("src.net.online")
 local Sync = require("src.net.sync")
 
 local lg = love.graphics
-local floor, min, max = math.floor, math.min, math.max
+local floor, ceil, min, max = math.floor, math.ceil, math.min, math.max
 
 local Game = {}
 
@@ -353,13 +353,15 @@ function Game:netEnded(reason)
     Online.close()
     local match = self.match
     if match.result then
-        self.rematchText = reason == "OPPONENT LEFT" and "OPPONENT LEFT" or "DISCONNECTED"
+        self.rematchText = reason == "CONNECTION LOST" and "DISCONNECTED" or reason
         if self.rematchBtn then self.rematchBtn.disabled = true end
         return
     end
     if reason == "OPPONENT LEFT" then
         match.result = { winner = match.human, reason = "RESIGNED" }
         self.rematchText = "OPPONENT LEFT"
+    elseif reason == "OPPONENT DISCONNECTED" then
+        match.result = { winner = match.human, reason = reason }
     else
         match.result = { winner = 0, reason = reason }
     end
@@ -653,8 +655,22 @@ function Game:drawResult()
     for _, b in ipairs(self.resultButtons) do b:draw() end
 end
 
+function Game:drawNetWarning()
+    local net = self.net
+    if not (net and net.session) or self.match.result then return end
+    local quiet = net:silence()
+    if quiet < Sync.WARN_AFTER then return end
+    local left = max(0, ceil(Sync.DROP_AFTER - quiet))
+    local text = "OPPONENT NOT RESPONDING  " .. left
+    local w = Text.width(text, 3) + 60
+    Pal.set(Pal.N, 0.85)
+    rect(960 - w / 2, 24, w, 56)
+    Text.print(text, 960, 40, 3, Pal.C, "center", Pal.N)
+end
+
 function Game:draw()
     self:drawScene()
+    self:drawNetWarning()
     self.pauseBtn:draw()
     if self.tut then self.tut:draw() end
     if self.resultT and self.overlayShown and not self.overlayHidden then
