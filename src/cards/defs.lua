@@ -5,7 +5,8 @@ local FILE, RANK, sq = Board.FILE, Board.RANK, Board.sq
 local abs = math.abs
 
 local D = {}
-D.VAL = { 1, 3, 3, 5, 9, 0 }
+D.VAL = {}
+for i = P, K do D.VAL[i] = math.floor(Board.VALUE[i] / Board.VALUE_SCALE + 0.5) end
 local VAL = D.VAL
 
 D.SCHOOLS = { "ARCANE", "PROTECTION", "BLOOD", "TIME" }
@@ -14,6 +15,10 @@ local function mine(b, side, s) local pc = b.p[s]; return pc ~= 0 and (pc > 0) =
 local function theirs(b, side, s) local pc = b.p[s]; return pc ~= 0 and (pc > 0) ~= (side > 0) end
 local function kind(b, s) return abs(b.p[s]) end
 local function edgeRank(s) return RANK[s] == 0 or RANK[s] == 7 end
+local function pawnLike(b, s)
+    local pc = b.p[s]
+    return pc ~= 0 and (abs(pc) == P or b:status(b.id[s], "pawned"))
+end
 
 local function collect(fn)
     local t = {}
@@ -32,7 +37,7 @@ local function destroy(b, s)
     local pc = b.p[s]
     local owner = pc > 0 and 1 or -1
     local list = b.captured[owner]
-    list[#list + 1] = { t = abs(pc), id = b.id[s] }
+    list[#list + 1] = { t = abs(pc), id = b.id[s], pawned = b:status(b.id[s], "pawned") }
     b.st[b.id[s]] = nil
     b.p[s], b.id[s] = 0, 0
     b.half = 0
@@ -78,7 +83,7 @@ card {
     prompt1 = "PICK A PIECE TO TELEPORT", prompt2 = "PICK AN EMPTY SQUARE",
     pick1 = ownNonKing,
     pick2 = function(b, side, a)
-        local pawn = kind(b, a) == P
+        local pawn = pawnLike(b, a)
         return collect(function(s) return b.p[s] == 0 and not (pawn and edgeRank(s)) end)
     end,
     apply = function(b, side, a, c) movePiece(b, a, c); return true end,
@@ -92,8 +97,8 @@ card {
     pick2 = function(b, side, a)
         return collect(function(s)
             if s == a or not mine(b, side, s) or kind(b, s) == K then return false end
-            if kind(b, a) == P and edgeRank(s) then return false end
-            if kind(b, s) == P and edgeRank(a) then return false end
+            if pawnLike(b, a) and edgeRank(s) then return false end
+            if pawnLike(b, s) and edgeRank(a) then return false end
             return kind(b, s) ~= kind(b, a)
         end)
     end,
@@ -117,7 +122,7 @@ card {
     pick1 = function(b, side)
         return enemyTargets(b, side, function(t, s)
             local to = pullTo(side, s)
-            return to ~= nil and b.p[to] == 0 and not (t == P and edgeRank(to))
+            return to ~= nil and b.p[to] == 0 and not (pawnLike(b, s) and edgeRank(to))
         end)
     end,
     apply = function(b, side, a)
@@ -202,7 +207,7 @@ card {
                     if e.frozen and e.frozen > ply then any = true end
                     e.frozen = nil
                 end
-                if not (e.shield or e.frozen or e.berserk) then b.st[id] = nil end
+                if not (e.shield or e.frozen or e.berserk or e.pawned) then b.st[id] = nil end
             end
         end
         for i = #b.zones, 1, -1 do
@@ -252,7 +257,8 @@ card {
 }
 
 card {
-    slug = "checkmates_grace", name = "CHECKMATE'S GRACE", school = "PROTECTION", cost = 3, endsTurn = true, tag = "*GRACE",
+    slug = "checkmates_grace", name = "CHECKMATE'S GRACE", school = "PROTECTION",
+    cost = 3, endsTurn = true, tag = "*GRACE",
     desc = "Your king leaps to a safe empty square up to 2 squares away. Ends your turn.",
     prompt1 = "PICK A SAFE SQUARE FOR THE KING",
     pick1 = function(b, side)
@@ -443,6 +449,24 @@ card {
 }
 
 card {
+    slug = "jesters_curse", name = "JESTER'S CURSE", school = "ARCANE",
+    role = true, cost = 3, endsTurn = true, tag = "*CURSE",
+    desc = "For 3 enemy turns, all enemy pieces except the king move like pawns. They then return.",
+    apply = function(b, side)
+        local ply = b.ply
+        local any = false
+        for s = 1, 64 do
+            local pc = b.p[s]
+            if pc ~= 0 and (pc > 0) ~= (side > 0) and abs(pc) ~= K and abs(pc) ~= P then
+                b:setStatus(b.id[s], "pawned", ply + 6)
+                any = true
+            end
+        end
+        return any
+    end,
+}
+
+card {
     slug = "meteor", name = "METEOR", school = "TIME", cost = 3, endsTurn = true, tag = "*METEOR",
     desc = "Destroy an unprotected enemy pawn, knight, bishop or rook. Ends your turn.",
     prompt1 = "PICK AN ENEMY PIECE TO DESTROY",
@@ -457,12 +481,15 @@ card {
 D.list = cards
 D.bySlug = {}
 D.byName = {}
+D.deck = {}
+D.roles = {}
 for i, c in ipairs(cards) do
     D.bySlug[c.slug] = c
     D.byName[c.name] = c
     c.index = i
     c.available = c.apply ~= nil
     c.steps = c.pick2 and 2 or (c.pick1 and 1 or 0)
+    if c.role then D.roles[#D.roles + 1] = c else D.deck[#D.deck + 1] = c end
 end
 
 return D

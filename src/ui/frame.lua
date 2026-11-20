@@ -1,22 +1,24 @@
+local Config = require("src.config")
 local A = require("src.assets.assets")
 local Pal = require("src.utils.palette")
 local Text = require("src.ui.text")
 
 local Frame = {}
+local F = Config.ui.frame
 
 function Frame.panel(x, y, w, h, title)
     Pal.set(Pal.N)
-    love.graphics.rectangle("fill", x + 12, y + 12, w, h)
+    love.graphics.rectangle("fill", x + F.shadow, y + F.shadow, w, h)
     love.graphics.setColor(1, 1, 1, 1)
-    A.ui.panel_large:draw(x, y, w, h, 2)
+    A.ui.panel_large:draw(x, y, w, h, Config.ui.scale)
     if title then
-        local tw = Text.width(title, 4) + 96
+        local tw = Text.width(title, F.titleScale) + F.titlePad
         local tx = math.floor((x + w / 2 - tw / 2) / 2) * 2
         Pal.set(Pal.N)
-        love.graphics.rectangle("fill", tx + 8, y - 34 + 8, tw, 72)
+        love.graphics.rectangle("fill", tx + F.shadow / 2, y + F.titleY + F.shadow / 2, tw, F.titleH)
         love.graphics.setColor(1, 1, 1, 1)
-        A.ui.dialogue:draw(tx, y - 34, tw, 72, 2)
-        Text.print(title, x + w / 2, y - 14, 4, Pal.C, "center", Pal.N)
+        A.ui.dialogue:draw(tx, y + F.titleY, tw, F.titleH, Config.ui.scale)
+        Text.print(title, x + w / 2, y + F.titleTextY, F.titleScale, Pal.C, "center", Pal.N)
     end
 end
 

@@ -1,12 +1,15 @@
 local Board = require("src.chess.board")
+local Config = require("src.config")
 local Eval = require("src.ai.eval")
 local bit = require("src.utils.bit")
 local band, rshift = bit.band, bit.rshift
 
 local Search = {}
-Search.MATE = 100000
-local MATE, INF = 100000, 1000000
-local MAXPLY = 64
+local AI = Config.ai
+Search.MATE = AI.mate
+local MATE, INF = AI.mate, AI.inf
+local MAXPLY = Config.chess.maxPly
+local SCORE, QS = AI.score, AI.qs
 local VALUE = Board.VALUE
 local abs = math.abs
 local random = (love and love.math and love.math.random) or math.random
@@ -14,11 +17,7 @@ local evaluate = Eval.evaluate
 
 local now = (love and love.timer and love.timer.getTime) or os.clock
 
-Search.LEVELS = {
-    { name = "EASY", depth = 1, qs = false, time = 0.3, noise = 220, blunder = 0.35, cast = 0.25, spellNoise = 300, spellDepth = 0 },
-    { name = "MEDIUM", depth = 2, qs = false, time = 0.6, noise = 90, blunder = 0.12, cast = 0.5, spellNoise = 120, spellDepth = 0 },
-    { name = "HARD", depth = 3, qs = true, time = 1.2, noise = 25, blunder = 0.04, cast = 0.8, spellNoise = 40, spellDepth = 1 },
-}
+Search.LEVELS = AI.levels
 
 function Search.level(l)
     if type(l) == "table" then return l end
@@ -38,7 +37,7 @@ local function newState(board, level)
         S.lists[i], S.scores[i] = {}, {}
         S.killers1[i], S.killers2[i] = 0, 0
     end
-    for i = 1, 4096 do S.history[i] = 0 end
+    for i = 1, AI.hashSlots do S.history[i] = 0 end
     return S
 end
 
@@ -60,15 +59,15 @@ local function scoreMoves(S, b, list, scores, n, ply)
         local promo = band(rshift(m, 12), 7)
         if victim ~= 0 or flag == 2 then
             local vt = victim ~= 0 and abs(victim) or 1
-            sc = 1000000 + VALUE[vt] * 10 - (VALUE[abs(p[from])] or 0) / 10
+            sc = SCORE.capture + VALUE[vt] * 10 - (VALUE[abs(p[from])] or 0) / 10
         elseif promo > 0 then
-            sc = 900000 + VALUE[promo]
+            sc = SCORE.promotion + VALUE[promo]
         elseif m == k1 then
-            sc = 800000
+            sc = SCORE.killer1
         elseif m == k2 then
-            sc = 799000
+            sc = SCORE.killer2
         else
-            sc = hist[band(m, 4095) + 1]
+            sc = hist[band(m, AI.hashSlots - 1) + 1]
         end
         scores[i] = sc
     end
@@ -88,7 +87,7 @@ end
 
 local function quiesce(S, b, alpha, beta, ply)
     S.nodes = S.nodes + 1
-    if band(S.nodes, 1023) == 0 then checkTime(S) end
+    if band(S.nodes, AI.timeCheckMask) == 0 then checkTime(S) end
     if S.stop then return 0 end
     local stand = evaluate(b) * b.side
     if stand >= beta then return stand end
@@ -102,9 +101,9 @@ local function quiesce(S, b, alpha, beta, ply)
         local m = pick(list, scores, i, n)
         local victim = p[band(rshift(m, 6), 63) + 1]
 
-        local gain = victim ~= 0 and VALUE[abs(victim)] or 100
-        if band(rshift(m, 12), 7) > 0 then gain = gain + 800 end
-        if stand + gain + 200 >= alpha then
+        local gain = victim ~= 0 and VALUE[abs(victim)] or QS.capture
+        if band(rshift(m, 12), 7) > 0 then gain = gain + QS.promotion end
+        if stand + gain + QS.margin >= alpha then
             local mover = b.side
             b:make(m)
             if not b:inCheck(mover) then
@@ -123,12 +122,12 @@ end
 
 local function negamax(S, b, depth, alpha, beta, ply)
     S.nodes = S.nodes + 1
-    if band(S.nodes, 1023) == 0 then checkTime(S) end
+    if band(S.nodes, AI.timeCheckMask) == 0 then checkTime(S) end
     if S.stop then return 0 end
-    if b.half >= 100 then return 0 end
+    if b.half >= Config.chess.fiftyMove then return 0 end
     local side = b.side
     local inCheck = b:inCheck(side)
-    if inCheck and ply < MAXPLY - 8 then depth = depth + 1 end
+    if inCheck and ply < MAXPLY - AI.checkExtension then depth = depth + 1 end
     if depth <= 0 then
         if S.level.qs == false then return evaluate(b) * side end
         return quiesce(S, b, alpha, beta, ply)
@@ -163,7 +162,7 @@ local function negamax(S, b, depth, alpha, beta, ply)
                             S.killers2[ply] = S.killers1[ply]
                             S.killers1[ply] = m
                         end
-                        local h = band(m, 4095) + 1
+                        local h = band(m, AI.hashSlots - 1) + 1
                         S.history[h] = S.history[h] + depth * depth
                     end
                     break
@@ -229,20 +228,20 @@ function Job:run()
         rootMoves, rootScores = nm, ns
         lastScores = ns
         rootScores = {}
-        if abs(sc) > MATE - 100 then break end
+        if abs(sc) > MATE - AI.mateMargin then break end
     end
 
     if (L.noise or 0) > 0 and lastScores then
         local best, bm = -INF, self.move
         for i = 1, n do
             local sc = lastScores[i]
-            if abs(sc) < MATE - 100 then sc = sc + (random() * 2 - 1) * L.noise end
+            if abs(sc) < MATE - AI.mateMargin then sc = sc + (random() * 2 - 1) * L.noise end
             if sc > best then best, bm = sc, rootMoves[i] end
         end
         self.move = bm
         if L.blunder > 0 and random() < L.blunder and n > 1 then
             local k = random(n)
-            if lastScores[k] > -MATE + 100 then self.move = rootMoves[k] end
+            if lastScores[k] > -MATE + AI.mateMargin then self.move = rootMoves[k] end
         end
     end
     self.done = true
@@ -259,7 +258,7 @@ end
 
 function Job:step(budget)
     if self.done then return true end
-    self.frameEnd = now() + (budget or 0.008)
+    self.frameEnd = now() + (budget or AI.frameBudget)
     local ok, err = coroutine.resume(self.co)
     if not ok then
         print("AI error: " .. tostring(err))
@@ -277,7 +276,7 @@ end
 
 function Search.score(board, depth, timeLimit, yielding, qs)
     local S = newState(board, { depth = depth, noise = 0, blunder = 0, qs = qs })
-    S.deadline = now() + (timeLimit or 1)
+    S.deadline = now() + (timeLimit or AI.defaultTime)
     if yielding then S.coroutine, S.frameEnd = true, -1 end
     local sc = negamax(S, board, depth, -INF, INF, 0)
     return sc, S.nodes, S.stop

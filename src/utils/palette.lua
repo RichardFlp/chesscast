@@ -8,6 +8,10 @@ Pal.N = hex("#112E81")
 Pal.I = hex("#4647AE")
 Pal.B = hex("#4382DF")
 Pal.C = hex("#AACCD6")
+Pal.RD = hex("#70121E")
+Pal.R = hex("#C4242C")
+Pal.RL = hex("#ECD8C6")
+Pal.K = hex("#000000")
 
 local setColor = love.graphics and love.graphics.setColor
 

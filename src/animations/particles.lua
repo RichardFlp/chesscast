@@ -1,3 +1,4 @@
+local Config = require("src.config")
 local A = require("src.assets.assets")
 local Pal = require("src.utils.palette")
 
@@ -7,8 +8,10 @@ Particles.__index = Particles
 local floor, random, sin, cos, pi = math.floor, love.math.random, math.sin, math.cos, math.pi
 
 function Particles.new(max)
-    local p = setmetatable({ max = max or 2048, n = 0 }, Particles)
-    p.x, p.y, p.vx, p.vy, p.life, p.age, p.size, p.col, p.grav, p.drag, p.kind = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
+    local p = setmetatable({ max = max or Config.ui.maxParticles, n = 0 }, Particles)
+    p.x, p.y, p.vx, p.vy = {}, {}, {}, {}
+    p.life, p.age, p.size, p.col = {}, {}, {}, {}
+    p.grav, p.drag, p.kind = {}, {}, {}
     p.batch = love.graphics.newSpriteBatch(A.pixel, p.max, "stream")
     p.intensity = 1
     return p

@@ -1,3 +1,4 @@
+local Config = require("src.config")
 
 local Audio = {}
 Audio.enabled = love.audio ~= nil
@@ -18,8 +19,8 @@ local current
 local lastPlay = {}
 
 local function loadFile(name, kind)
-    for _, ext in ipairs({ ".ogg", ".wav", ".mp3" }) do
-        local path = "assets/audio/" .. name .. ext
+    for _, ext in ipairs(Config.audio.extensions) do
+        local path = Config.assets.audio .. name .. ext
         if love.filesystem.getInfo(path) then
             local ok, src = pcall(love.audio.newSource, path, kind)
             if ok then return src end
@@ -34,7 +35,7 @@ function Audio.load()
         local src = loadFile(name, "static")
         if src then
             sources[name] = { src }
-            for _ = 2, 4 do sources[name][#sources[name] + 1] = src:clone() end
+            for _ = 2, Config.audio.voices do sources[name][#sources[name] + 1] = src:clone() end
         end
     end
     local song = loadFile("music_menu", "stream")
@@ -47,7 +48,7 @@ end
 function Audio.setVolumes(master, mus, sfx)
     Audio.volume.master, Audio.volume.music, Audio.volume.sfx = master, mus, sfx
     if current and music[current] then
-        music[current]:setVolume(master * mus * 0.55)
+        music[current]:setVolume(master * mus * Config.audio.musicGain)
     end
 end
 
@@ -55,7 +56,7 @@ function Audio.play(name, pitch, vol)
     local list = sources[name]
     if not list then return end
     local now = love.timer.getTime()
-    if lastPlay[name] and now - lastPlay[name] < 0.025 then return end
+    if lastPlay[name] and now - lastPlay[name] < Config.audio.cooldown then return end
     lastPlay[name] = now
     local v = Audio.volume
     local gain = (GAIN[CHANNEL[name] or "ui"] or 1) * (vol or 1) * v.master * v.sfx
@@ -83,7 +84,7 @@ function Audio.music(name)
     current = name
     if m then
         pcall(function()
-            m:setVolume(Audio.volume.master * Audio.volume.music * 0.55)
+            m:setVolume(Audio.volume.master * Audio.volume.music * Config.audio.musicGain)
             m:play()
         end)
     end

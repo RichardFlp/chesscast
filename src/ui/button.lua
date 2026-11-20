@@ -1,3 +1,4 @@
+local Config = require("src.config")
 local A = require("src.assets.assets")
 local Pal = require("src.utils.palette")
 local Text = require("src.ui.text")
@@ -10,9 +11,9 @@ Button.__index = Button
 
 function Button.new(o)
     local b = setmetatable(o, Button)
-    b.h = b.h or 72
-    b.w = b.w or 360
-    b.textScale = b.textScale or 3
+    b.h = b.h or Config.ui.button.height
+    b.w = b.w or Config.ui.button.width
+    b.textScale = b.textScale or Config.ui.button.textScale
     b.style = b.style or "secondary"
     b.hover, b.pressed, b.focus = false, false, false
     b.sx = Spring.new(0, 260, 16)
@@ -20,7 +21,7 @@ function Button.new(o)
     b.ss = Spring.new(1, 300, 14)
     b.mark = Spring.new(0, 200, 18)
     b.t = love.math.random() * 10
-    b.hoverShift = b.hoverShift or 16
+    b.hoverShift = b.hoverShift or Config.ui.button.hoverShift
     return b
 end
 

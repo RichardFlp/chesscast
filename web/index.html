@@ -17,25 +17,39 @@
 <canvas id="loading" width="800" height="450"></canvas>
 <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
 <script>
+  var CFG = {
+    width: 800,
+    height: 450,
+    bar: { x: 250, y: 236, w: 300, h: 16 },
+    titleY: 200,
+    statusY: 290,
+    memoryMb: 128,
+    keys: [32, 37, 38, 39, 40],
+    colors: { navy: '#112E81', indigo: '#4647AE', blue: '#4382DF', light: '#AACCD6' }
+  };
   var lc = document.getElementById('loading').getContext('2d');
   function drawLoading(text) {
-    var w = 800, h = 450;
-    lc.fillStyle = '#112E81'; lc.fillRect(0, 0, w, h);
-    lc.fillStyle = '#4647AE'; lc.fillRect(250, 236, 300, 16);
+    var w = CFG.width, h = CFG.height, bar = CFG.bar, colors = CFG.colors;
+    lc.fillStyle = colors.navy; lc.fillRect(0, 0, w, h);
+    lc.fillStyle = colors.indigo; lc.fillRect(bar.x, bar.y, bar.w, bar.h);
     var m = /\((\d+)\/(\d+)\)/.exec(text || '');
-    if (m && +m[2] > 0) { lc.fillStyle = '#AACCD6'; lc.fillRect(250, 236, 300 * m[1] / m[2], 16); }
-    lc.fillStyle = '#AACCD6'; lc.font = 'bold 44px monospace'; lc.textAlign = 'center';
-    lc.fillText('CHESSCAST', w / 2, 200);
-    lc.fillStyle = '#4382DF'; lc.font = '18px monospace';
-    lc.fillText((text || '').toUpperCase(), w / 2, 290);
+    if (m && +m[2] > 0) {
+      lc.fillStyle = colors.light;
+      lc.fillRect(bar.x, bar.y, bar.w * m[1] / m[2], bar.h);
+    }
+    lc.fillStyle = colors.light; lc.font = 'bold 44px monospace'; lc.textAlign = 'center';
+    lc.fillText('CHESSCAST', w / 2, CFG.titleY);
+    lc.fillStyle = colors.blue; lc.font = '18px monospace';
+    lc.fillText((text || '').toUpperCase(), w / 2, CFG.statusY);
   }
   function focusGame() { window.focus(); document.getElementById('canvas').focus(); }
   window.onload = focusGame;
   window.addEventListener('mousedown', focusGame);
   window.addEventListener('keydown', function (e) {
-    if ([32, 37, 38, 39, 40].indexOf(e.keyCode) > -1) e.preventDefault();
+    if (CFG.keys.indexOf(e.keyCode) > -1) e.preventDefault();
   }, false);
 
+  var NET = { prefix: 'net_', ext: '.txt', paste: 'net_paste.txt', tag: '@@CPNET ', heartbeatMs: 3000 };
   var NET_SERVER = '';
   var net = { dir: null, links: {} };
   function toHex(bytes) {
@@ -53,7 +67,7 @@
     try { Module.FS_unlink(net.dir + '/' + name); } catch (e) {}
     try { Module.FS_createDataFile(net.dir, name, text, true, true); } catch (e) { console.error('net write', e); }
   }
-  function netEvent(link, text) { link.seq++; netWrite('net_' + link.id + '_' + link.seq + '.txt', text); }
+  function netEvent(link, text) { link.seq++; netWrite(NET.prefix + link.id + '_' + link.seq + NET.ext, text); }
   function netOpen(id, url, text) {
     var link = { id: id, seq: 0, ws: null, closed: false, text: !!text };
     net.links[id] = link;
@@ -72,7 +86,7 @@
       netEvent(link, 'open');
       if (link.text) link.beat = setInterval(function () {
         if (link.ws && link.ws.readyState === 1) link.ws.send('I\nHB');
-      }, 3000);
+      }, NET.heartbeatMs);
     };
     link.ws.onmessage = function (e) {
       if (typeof e.data === 'string') {
@@ -106,14 +120,14 @@
   }
   window.addEventListener('paste', function (e) {
     var t = (e.clipboardData || window.clipboardData).getData('text');
-    if (t) netWrite('net_paste.txt', toHex(new TextEncoder().encode(t)));
+    if (t) netWrite(NET.paste, toHex(new TextEncoder().encode(t)));
   });
 
   var Module = {
     arguments: ['./game.love'],
-    INITIAL_MEMORY: 134217728,
+    INITIAL_MEMORY: CFG.memoryMb * 1024 * 1024,
     print: function (s) {
-      if (s.indexOf('@@CPNET ') === 0) netCommand(s.substr(8));
+      if (s.indexOf(NET.tag) === 0) netCommand(s.substr(NET.tag.length));
       else console.log(s);
     },
     printErr: console.error.bind(console),

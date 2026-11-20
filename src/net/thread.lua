@@ -1,9 +1,11 @@
 local inbox, outbox, host, port = ...
+local Config = require("src.config")
 require("love.timer")
 local socket = require("socket")
+local SendAll = require("src.net.sendall")
 
-local MAX_FRAME = 64 * 1024
-local PING_EVERY = 20
+local MAX_FRAME = Config.net.maxFrame
+local PING_EVERY = Config.net.pingEvery
 local PING = "\5"
 
 local function le4(n)
@@ -12,7 +14,7 @@ end
 
 local sock, err = socket.tcp()
 if sock then
-    sock:settimeout(6)
+    sock:settimeout(Config.net.connectTimeout)
     local ok
     ok, err = sock:connect(host, port)
     if not ok then sock:close(); sock = nil end
@@ -22,17 +24,23 @@ if not sock then
     return
 end
 sock:setoption("tcp-nodelay", true)
-sock:settimeout(0.03)
+sock:settimeout(Config.net.pollTimeout)
 inbox:push({ ev = "open" })
 
 local buf = ""
 local lastSend = love.timer.getTime()
 
+local function sendAll(data)
+    return SendAll.run(function(payload, first)
+        return sock:send(payload, first)
+    end, data)
+end
+
 local function send(payload)
     local data = le4(#payload) .. payload
-    sock:settimeout(5)
-    local _, e = sock:send(data)
-    sock:settimeout(0.03)
+    sock:settimeout(Config.net.sendTimeout)
+    local _, e = sendAll(data)
+    sock:settimeout(Config.net.pollTimeout)
     lastSend = love.timer.getTime()
     return e
 end
@@ -55,11 +63,12 @@ while true do
     end
     if love.timer.getTime() - lastSend > PING_EVERY then send(PING) end
 
-    local data, e, partial = sock:receive(8192)
+    local data, e, partial = sock:receive(Config.net.receiveBytes)
     local chunk = data or partial
     if chunk and #chunk > 0 then buf = buf .. chunk end
-    if e == "closed" then
-        inbox:push({ ev = "closed", msg = "SERVER CLOSED THE CONNECTION" })
+    if e and e ~= "timeout" then
+        local msg = e == "closed" and "SERVER CLOSED THE CONNECTION" or "CONNECTION LOST"
+        inbox:push({ ev = "closed", msg = msg })
         sock:close()
         return
     end

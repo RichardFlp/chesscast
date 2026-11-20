@@ -1,3 +1,4 @@
+local Config = require("src.config")
 local bit = require("src.utils.bit")
 local band, bor, rshift, lshift = bit.band, bit.bor, bit.rshift, bit.lshift
 local abs, floor = math.abs, math.floor
@@ -7,7 +8,8 @@ Board.__index = Board
 
 local P, N, B, R, Q, K = 1, 2, 3, 4, 5, 6
 Board.P, Board.N, Board.B, Board.R, Board.Q, Board.K = P, N, B, R, Q, K
-Board.VALUE = { 100, 320, 330, 500, 900, 0 }
+Board.VALUE = Config.chess.values
+Board.VALUE_SCALE = Config.chess.valueScale
 Board.LETTER = { "", "N", "B", "R", "Q", "K" }
 Board.NAME = { "pawn", "knight", "bishop", "rook", "queen", "king" }
 
@@ -133,7 +135,11 @@ function Board.fromFEN(fen)
     end
     b.side = (parts[2] == "b") and -1 or 1
     local c = parts[3] or "-"
-    b.castle = (c:find("K") and WK or 0) + (c:find("Q") and WQ or 0) + (c:find("k") and BK or 0) + (c:find("q") and BQ or 0)
+    b.castle = 0
+    if c:find("K") then b.castle = b.castle + WK end
+    if c:find("Q") then b.castle = b.castle + WQ end
+    if c:find("k") then b.castle = b.castle + BK end
+    if c:find("q") then b.castle = b.castle + BQ end
     if parts[4] and parts[4] ~= "-" then
         b.ep = sq(parts[4]:byte(1) - 97, tonumber(parts[4]:sub(2)) - 1)
     end
@@ -155,7 +161,9 @@ function Board:clone()
     b.side, b.castle, b.ep, b.half, b.ply, b.nextId = self.side, self.castle, self.ep, self.half, self.ply, self.nextId
     b.king = { [1] = self.king[1], [-1] = self.king[-1] }
     b.st = {}
-    for k, v in pairs(self.st) do b.st[k] = { shield = v.shield, frozen = v.frozen, berserk = v.berserk } end
+    for k, v in pairs(self.st) do
+        b.st[k] = { shield = v.shield, frozen = v.frozen, berserk = v.berserk, pawned = v.pawned }
+    end
     b.zones = {}
     for i, z in ipairs(self.zones) do b.zones[i] = { owner = z.owner, f = z.f, r = z.r, untilPly = z.untilPly } end
     b.fog = { [1] = self.fog[1], [-1] = self.fog[-1] }
@@ -163,7 +171,7 @@ function Board:clone()
     b.lastStand = { [1] = self.lastStand[1], [-1] = self.lastStand[-1] }
     b.captured = { [1] = {}, [-1] = {} }
     for _, sd in ipairs({ 1, -1 }) do
-        for i, c in ipairs(self.captured[sd]) do b.captured[sd][i] = { t = c.t, id = c.id } end
+        for i, c in ipairs(self.captured[sd]) do b.captured[sd][i] = { t = c.t, id = c.id, pawned = c.pawned } end
     end
     b.castleIds = {}
     for k, v in pairs(self.castleIds) do b.castleIds[k] = v end
@@ -183,10 +191,13 @@ function Board:setStatus(id, key, untilPly)
 end
 
 function Board:isProtected(s)
+    local pc = self.p[s]
+    if pc == 0 then return false end
+
     local ply = self.ply
     local st = self.st[self.id[s]]
     if st and st.shield and st.shield > ply then return true end
-    local pc = self.p[s]
+
     local side = pc > 0 and 1 or -1
     local zones = self.zones
     for i = 1, #zones do
@@ -203,31 +214,52 @@ function Board:isProtected(s)
 end
 
 function Board:isAttacked(s, by)
-    local p = self.p
-    local f = FILE[s]
+    local p, st, ply, id = self.p, self.st, self.ply, self.id
+    local function pawnedAt(src)
+        local q = p[src]
+        if q == 0 or (q > 0) ~= (by > 0) then return false end
+        local e = st[id[src]]
+        return e ~= nil and e.pawned ~= nil and e.pawned > ply
+    end
 
+    local f = FILE[s]
     local pr = RANK[s] - by
     if pr >= 0 and pr <= 7 then
-        if f > 0 and p[sq(f - 1, pr)] == by then return true end
-        if f < 7 and p[sq(f + 1, pr)] == by then return true end
+        if f > 0 then
+            local src = sq(f - 1, pr)
+            if p[src] == by or pawnedAt(src) then return true end
+        end
+        if f < 7 then
+            local src = sq(f + 1, pr)
+            if p[src] == by or pawnedAt(src) then return true end
+        end
     end
     local kn = KNIGHT[s]
-    for i = 1, #kn do if p[kn[i]] == N * by then return true end end
+    for i = 1, #kn do
+        local src = kn[i]
+        if p[src] == N * by and not pawnedAt(src) then return true end
+    end
     local kg = KING[s]
-    for i = 1, #kg do if p[kg[i]] == K * by then return true end end
-    local st, ply, id = self.st, self.ply, self.id
+    for i = 1, #kg do
+        local src = kg[i]
+        if p[src] == K * by and not pawnedAt(src) then return true end
+    end
+    local limit = (self.fog[by] > ply) and 2 or 8
     for d = 1, 8 do
         local ray = RAYS[d][s]
-        local a, b2 = R * by, Q * by
-        if d > 4 then a = B * by end
-        for i = 1, #ray do
-            local q = p[ray[i]]
+        local lim = #ray
+        if lim > limit then lim = limit end
+        local rook, queen = R * by, Q * by
+        if d > 4 then rook = B * by end
+        for i = 1, lim do
+            local src = ray[i]
+            local q = p[src]
             if q ~= 0 then
-                if q == a or q == b2 then return true end
-                if q * by > 0 and q ~= K * by then
-                    local e = st[id[ray[i]]]
-                    if e and e.berserk and e.berserk > ply then return true end
-                end
+                local e = st[id[src]]
+                local pawned = e ~= nil and e.pawned ~= nil and e.pawned > ply
+                if not pawned and (q == rook or q == queen) then return true end
+                if not pawned and q * by > 0 and q ~= K * by
+                    and e and e.berserk and e.berserk > ply then return true end
                 break
             end
         end
@@ -263,19 +295,22 @@ function Board:gen(list, capsOnly)
     for s = 1, 64 do
         local pc = p[s]
         if pc ~= 0 and (pc > 0) == (side > 0) then
-            local t = pc * side
             local e = st[id[s]]
+            local pawned = e ~= nil and e.pawned ~= nil and e.pawned > ply
+            local t = pc * side
+            if pawned then t = P end
             if not (e and e.frozen and e.frozen > ply) then
                 local first = n + 1
                 if t == P then
                     local fwd = s + 8 * side
                     local r = RANK[s]
                     if fwd >= 1 and fwd <= 64 then
-                        if p[fwd] == 0 and not capsOnly then
+                        if p[fwd] == 0 and not capsOnly
+                            and not (pawned and (RANK[fwd] == 7 or RANK[fwd] == 0)) then
                             n = addPawnMove(list, n, s, fwd, side)
                             local startRank = side == 1 and 1 or 6
                             local dbl = fwd + 8 * side
-                            if r == startRank and p[dbl] == 0 then
+                            if not pawned and r == startRank and p[dbl] == 0 then
                                 n = n + 1; list[n] = encode(s, dbl, 0, 1)
                             end
                         end
@@ -285,7 +320,8 @@ function Board:gen(list, capsOnly)
                             if tf >= 0 and tf <= 7 then
                                 local to = fwd + df
                                 local q = p[to]
-                                if q * side < 0 and not self:isProtected(to) then
+                                if q * side < 0 and not self:isProtected(to)
+                                    and not (pawned and (RANK[to] == 7 or RANK[to] == 0)) then
                                     n = addPawnMove(list, n, s, to, side)
                                 elseif q == 0 then
                                     local victim = s + df
@@ -326,7 +362,7 @@ function Board:gen(list, capsOnly)
                     if t == B then d0 = 5 elseif t == R then d1 = 4 end
                     n = self:_genRays(list, n, s, d0, d1, maxRange, capsOnly, false)
                 end
-                if e and e.berserk and e.berserk > ply and t ~= K and t ~= Q then
+                if e and e.berserk and e.berserk > ply and not pawned and t ~= K and t ~= Q then
                     n = self:_genRays(list, n, s, 1, 8, maxRange, capsOnly, t == P, first)
                 end
             end
@@ -369,14 +405,21 @@ function Board:_genCastles(list, n, s)
     if s ~= sq(4, home) then return n end
     local kRight, qRight = side == 1 and WK or BK, side == 1 and WQ or BQ
     local enemy = -side
-    if band(c, kRight) ~= 0 and p[sq(7, home)] == R * side and p[sq(5, home)] == 0 and p[sq(6, home)] == 0
+    if band(c, kRight) ~= 0
+        and p[sq(7, home)] == R * side and p[sq(5, home)] == 0 and p[sq(6, home)] == 0
         and not self:status(self.id[sq(7, home)], "frozen")
-        and not self:isAttacked(s, enemy) and not self:isAttacked(sq(5, home), enemy) and not self:isAttacked(sq(6, home), enemy) then
+        and not self:status(self.id[sq(7, home)], "pawned")
+        and not self:isAttacked(s, enemy) and not self:isAttacked(sq(5, home), enemy)
+        and not self:isAttacked(sq(6, home), enemy) then
         n = n + 1; list[n] = encode(s, sq(6, home), 0, 3)
     end
-    if band(c, qRight) ~= 0 and p[sq(0, home)] == R * side and p[sq(1, home)] == 0 and p[sq(2, home)] == 0 and p[sq(3, home)] == 0
+    if band(c, qRight) ~= 0
+        and p[sq(0, home)] == R * side and p[sq(1, home)] == 0
+        and p[sq(2, home)] == 0 and p[sq(3, home)] == 0
         and not self:status(self.id[sq(0, home)], "frozen")
-        and not self:isAttacked(s, enemy) and not self:isAttacked(sq(3, home), enemy) and not self:isAttacked(sq(2, home), enemy) then
+        and not self:status(self.id[sq(0, home)], "pawned")
+        and not self:isAttacked(s, enemy) and not self:isAttacked(sq(3, home), enemy)
+        and not self:isAttacked(sq(2, home), enemy) then
         n = n + 1; list[n] = encode(s, sq(2, home), 0, 4)
     end
     return n
@@ -394,6 +437,7 @@ function Board:make(m)
     self.Ucastle[u], self.Uep[u], self.Uhalf[u], self.Upiece[u] = self.castle, self.ep, self.half, p[from]
     local pc = p[from]
     local captured = p[capSq]
+    local pawnMove = pc == P * side or self:status(id[from], "pawned")
     p[capSq] = 0; id[capSq] = 0
     p[to] = promo > 0 and promo * side or pc
     id[to] = id[from]
@@ -410,7 +454,7 @@ function Board:make(m)
     end
     self.ep = (flag == 1) and (from + 8 * side) or 0
     self.castle = band(self.castle, CMASK[from], CMASK[to])
-    if pc == P * side or captured ~= 0 then self.half = 0 else self.half = self.half + 1 end
+    if pawnMove or captured ~= 0 then self.half = 0 else self.half = self.half + 1 end
     self.side = -side
     self.ply = self.ply + 1
     return captured
@@ -482,11 +526,15 @@ end
 function Board:play(m)
     local side = self.side
     local u = self.un + 1
+    local capSq = Board.flag(m) == 2 and Board.to(m) - 8 * side or Board.to(m)
+    local priorCapId = self.id[capSq]
+    local wasPawned = priorCapId ~= 0 and self:status(priorCapId, "pawned")
     local captured = self:make(m)
     local capId = self.UcapId[u]
     if captured ~= 0 then
+        self.st[capId] = nil
         local list = self.captured[-side]
-        list[#list + 1] = { t = abs(captured), id = capId }
+        list[#list + 1] = { t = abs(captured), id = capId, pawned = wasPawned }
     end
     self:_initUndo()
     return captured, capId
@@ -516,30 +564,120 @@ function Board:removeExpired()
         if e.shield and e.shield <= ply then e.shield = nil end
         if e.frozen and e.frozen <= ply then e.frozen = nil end
         if e.berserk and e.berserk <= ply then e.berserk = nil end
-        if not (e.shield or e.frozen or e.berserk) then self.st[k] = nil end
+        if e.pawned and e.pawned <= ply then e.pawned = nil end
+        if not (e.shield or e.frozen or e.berserk or e.pawned) then self.st[k] = nil end
     end
     for i = #self.zones, 1, -1 do
         if self.zones[i].untilPly <= ply then table.remove(self.zones, i) end
     end
 end
 
+local function pawnedAt(b, s)
+    local pc = b.p[s]
+    if pc == 0 then return false end
+    local e = b.st[b.id[s]]
+    return e ~= nil and e.pawned ~= nil and e.pawned > b.ply
+end
+
+local function pawnLike(b, s, side)
+    local pc = b.p[s]
+    if pc == 0 or pc * side < 0 then return false end
+    return abs(pc) == P or pawnedAt(b, s)
+end
+
+local function epKey(b)
+    local ep = b.ep
+    if ep == 0 or b.p[ep] ~= 0 then return 0 end
+    local side = b.side
+    local victim = ep - 8 * side
+    if victim < 1 or victim > 64 then return 0 end
+    if b.p[victim] ~= -P * side then return 0 end
+    local f = FILE[victim]
+    for _, df in ipairs({ -1, 1 }) do
+        local tf = f + df
+        if tf >= 0 and tf <= 7 then
+            local s = victim + df
+            if pawnLike(b, s, side) and not b:status(b.id[s], "frozen") and not b:isProtected(victim) then
+                local test = b:clone()
+                test:make(encode(s, ep, 0, 2))
+                if not test:inCheck(side) then return ep end
+            end
+        end
+    end
+    return 0
+end
+
+local function statusPart(b, s)
+    local id = b.id[s]
+    local e = id ~= 0 and b.st[id]
+    if not e then return "" end
+    local ply, parts = b.ply, {}
+    if e.shield and e.shield > ply then parts[#parts + 1] = "S" .. e.shield end
+    if e.frozen and e.frozen > ply then parts[#parts + 1] = "F" .. e.frozen end
+    if e.berserk and e.berserk > ply then parts[#parts + 1] = "B" .. e.berserk end
+    if e.pawned and e.pawned > ply then parts[#parts + 1] = "P" .. e.pawned end
+    return table.concat(parts, ",")
+end
+
+local function activeUntil(v, ply)
+    return v and v > ply and tostring(v) or "0"
+end
+
 function Board:key()
     local t = {}
-    for s = 1, 64 do t[s] = string.char(self.p[s] + 72) end
+    for s = 1, 64 do
+        local st = statusPart(self, s)
+        t[s] = string.char(self.p[s] + 72) .. (st ~= "" and ("(" .. st .. ")") or "")
+    end
     t[65] = self.side == 1 and "w" or "b"
     t[66] = string.char(65 + self.castle)
-    t[67] = tostring(self.ep)
+    t[67] = tostring(epKey(self))
+    local zones = {}
+    for _, z in ipairs(self.zones) do
+        if z.untilPly > self.ply then
+            zones[#zones + 1] = string.format("%d:%d:%d:%d", z.owner, z.f, z.r, z.untilPly)
+        end
+    end
+    table.sort(zones)
+    t[68] = table.concat(zones, ";")
+    t[69] = table.concat({
+        activeUntil(self.fog[1], self.ply), activeUntil(self.fog[-1], self.ply),
+        activeUntil(self.epAny[1], self.ply), activeUntil(self.epAny[-1], self.ply),
+        activeUntil(self.lastStand[1], self.ply), activeUntil(self.lastStand[-1], self.ply),
+    }, ",")
+    local caps = {}
+    for _, side in ipairs({ 1, -1 }) do
+        local list = {}
+        for _, c in ipairs(self.captured[side]) do
+            list[#list + 1] = string.char(64 + c.t) .. (c.pawned and "p" or "")
+        end
+        table.sort(list)
+        caps[#caps + 1] = (side == 1 and "W" or "B") .. table.concat(list, ",")
+    end
+    t[70] = table.concat(caps, "|")
     return table.concat(t)
 end
 
 function Board:insufficientMaterial()
     local minors, others = 0, 0
+    local knight, bishopColor = false, nil
+    local sameBishopColor = true
     for s = 1, 64 do
         local t = abs(self.p[s])
-        if t == N or t == B then minors = minors + 1
-        elseif t ~= 0 and t ~= K then others = others + 1 end
+        if t == N then
+            minors, knight = minors + 1, true
+        elseif t == B then
+            minors = minors + 1
+            local color = (FILE[s] + RANK[s]) % 2
+            if bishopColor == nil then bishopColor = color
+            elseif bishopColor ~= color then sameBishopColor = false end
+        elseif t ~= 0 and t ~= K then
+            others = others + 1
+        end
     end
-    return others == 0 and minors <= 1
+    if others > 0 then return false end
+    if minors <= 1 then return true end
+    return not knight and sameBishopColor
 end
 
 function Board:san(m, legal)
@@ -548,6 +686,7 @@ function Board:san(m, legal)
     if flag == 4 then return "O-O-O" end
     local pc = self.p[from]
     local t = abs(pc)
+    if self:status(self.id[from], "pawned") then t = P end
     local capture = self.p[to] ~= 0 or flag == 2
     local s = ""
     if t == P then

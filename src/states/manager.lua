@@ -12,8 +12,9 @@ function M.set(name, params)
 end
 
 function M.switch(name, params)
-    if Transition.busy() then return end
+    if Transition.busy() then return false end
     Transition.start(function() M.set(name, params) end)
+    return true
 end
 
 function M.call(fn, ...)

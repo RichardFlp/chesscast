@@ -1,5 +1,6 @@
 io.stdout:setvbuf("no")
 
+local Config = require("src.config")
 local args = {}
 for i, a in ipairs(arg or {}) do args[i] = a end
 local function argValue(name)
@@ -7,7 +8,7 @@ local function argValue(name)
     return nil
 end
 
-if argValue("--auto") or argValue("--test") then
+if argValue("--test") then
     function love.errorhandler(msg)
         print("ERROR: " .. tostring(msg))
         print(debug.traceback())
@@ -18,13 +19,12 @@ end
 if argValue("--test") then
     function love.load()
         local ok = true
-        local suites = { "src.chess.test", "src.cards.test", "src.ai.test" }
-        for _, name in ipairs(suites) do
+        for _, name in ipairs(Config.tests) do
             local found, s = pcall(require, name)
-            if found then
+            if found and type(s) == "table" and type(s.run) == "function" then
                 local passed = s.run(print)
                 ok = passed and ok
-            elseif not tostring(s):find("not found") then
+            else
                 print("ERROR loading " .. name .. ": " .. tostring(s)); ok = false
             end
         end
@@ -42,10 +42,11 @@ local BG = require("src.ui.background")
 local App = require("src.app")
 local M = require("src.states.manager")
 local Transition = require("src.animations.transition")
-
-local driver
+local Window = require("src.ui.window")
 
 function love.load()
+    App.load()
+    if Screen.chromeOn then Window.setVisible(false) end
     love.graphics.setDefaultFilter("nearest", "nearest")
     love.graphics.setLineStyle("rough")
     local t0 = love.timer.getTime()
@@ -53,11 +54,9 @@ function love.load()
     A.load(); lap("assets")
     Text.init()
     Screen.init(); lap("screen")
-    App.load()
     if App.WEB then require("src.net.webnet").init() end
     Audio.load(); lap("audio")
     App.applyAudio()
-    App.applyWindow()
     BG.init()
     M.register("splash", require("src.states.splash"))
     M.register("menu", require("src.states.menu"))
@@ -65,28 +64,29 @@ function love.load()
     M.register("setup", require("src.states.setup"))
     M.register("campaign", require("src.states.campaign"))
     M.register("multiplayer", require("src.states.multiplayer"))
+    M.register("matchmaking", require("src.states.matchmaking"))
     M.register("game", require("src.states.game"))
     M.register("lobby", require("src.states.lobby"))
     local server = argValue("--server")
     if type(server) == "string" then require("src.net.online").setServer(server) end
-    local auto = argValue("--auto")
-    M.set(auto and "menu" or "splash")
-    if auto then
-        driver = require("src.debug." .. auto)
-        driver.start(args)
+    M.set("splash")
+    App.applyWindow()
+    if Screen.chromeOn then
+        local w, h = love.graphics.getDimensions()
+        local dw, dh = love.window.getDesktopDimensions()
+        love.window.setPosition(math.floor((dw - w) / 2), math.floor((dh - h) / 2))
+        Window.setVisible(true)
     end
 end
 
-local FIXED_MAX = 1 / 20
+local FIXED_MAX = Config.app.fixedMax
 function love.update(dt)
     if dt > FIXED_MAX then dt = FIXED_MAX end
-    if driver then dt = driver.dt or dt end
     Screen.update(dt)
     Transition.update(dt)
+    Window:update()
     local mx, my = Screen.mouse()
-    if driver and driver.mx then mx, my = driver.mx, driver.my end
     M.call("update", dt, mx, my)
-    if driver then driver.update(dt) end
 end
 
 function love.draw()
@@ -94,17 +94,19 @@ function love.draw()
     M.call("draw")
     Transition.draw()
     Screen.finish()
-    if driver and driver.afterDraw then driver.afterDraw() end
+    Window:draw()
 end
 
 function love.resize(w, h) Screen.resize(w, h) end
 
 function love.mousepressed(x, y, b)
+    if Window:mousepressed(x, y, b) then return end
     local vx, vy = Screen.toVirtual(x, y)
     M.call("mousepressed", vx, vy, b)
 end
 
 function love.mousereleased(x, y, b)
+    if Window:mousereleased(x, y, b) then return end
     local vx, vy = Screen.toVirtual(x, y)
     M.call("mousereleased", vx, vy, b)
 end

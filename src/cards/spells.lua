@@ -1,4 +1,5 @@
 local Board = require("src.chess.board")
+local Config = require("src.config")
 local Defs = require("src.cards.defs")
 
 local S = {}
@@ -12,8 +13,15 @@ function S.tidy(b)
     end
 end
 
+local function targetExists(list, target)
+    for _, v in ipairs(list) do if v == target then return true end end
+    return false
+end
+
 function S.check(board, side, def, a, c, ctx)
     if board.side ~= side then return false end
+    if def.pick1 and not targetExists(def.pick1(board, side, ctx), a) then return false end
+    if def.pick2 and not targetExists(def.pick2(board, side, a, ctx), c) then return false end
     local wasCheck = board:inCheck(side)
     local b = board:clone()
     if not def.apply(b, side, a, c, ctx) then return false end
@@ -60,7 +68,7 @@ function S.firstTargets(board, side, def, ctx)
     return out
 end
 
-S.OPENING = 8
+S.OPENING = Config.cards.opening
 
 function S.castable(board, side, def, state, ctx, skipTargets)
     if not def.available then return false, "NOT AVAILABLE" end

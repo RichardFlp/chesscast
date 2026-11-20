@@ -1,3 +1,5 @@
+local Config = require("src.config")
+local Screen = require("src.utils.screen")
 local A = require("src.assets.assets")
 local Pal = require("src.utils.palette")
 local Text = require("src.ui.text")
@@ -8,6 +10,7 @@ local Audio = require("src.audio.audio")
 local U = require("src.utils.util")
 local Board = require("src.chess.board")
 local Defs = require("src.cards.defs")
+local App = require("src.app")
 
 local T = {}
 T.__index = T
@@ -17,19 +20,12 @@ local floor, max, min, sin = math.floor, math.max, math.min, math.sin
 
 local function rect(x, y, w, h) lg.rectangle("fill", x, y, w, h) end
 
-local R = {
-    board = { 548, 124, 824, 824 },
-    clock = { 36, 124, 408, 80 },
-    slots = { 88, 212, 304, 632 },
-    mana = { 36, 852, 408, 48 },
-    moves = { 36, 912, 408, 148 },
-    cpu = { 1468, 4, 424, 1064 },
-    pause = { 1376, 20, 96, 80 },
-}
+local TUT = Config.ui.tutorial
+local R = TUT
 
-local BODY = 2
-local LINE = 20
-local PAD = 28
+local BODY = TUT.body
+local LINE = TUT.line
+local PAD = TUT.pad
 
 local function humanMoves(g)
     local n, side = 0, g.match.human
@@ -59,8 +55,12 @@ local STEPS = {
     {
         title = "HOW THE PIECES MOVE",
         rows = {
-            { icon = Board.P, head = "PAWN", text = "ONE SQUARE FORWARD, OR TWO ON ITS FIRST MOVE. CAPTURES ONE SQUARE DIAGONALLY FORWARD." },
-            { icon = Board.N, head = "KNIGHT", text = "JUMPS IN AN L: TWO SQUARES ONE WAY, THEN ONE TO THE SIDE. IT CAN JUMP OVER PIECES." },
+            { icon = Board.P, head = "PAWN",
+                text = "ONE SQUARE FORWARD, OR TWO ON ITS FIRST MOVE. "
+                    .. "CAPTURES ONE SQUARE DIAGONALLY FORWARD." },
+            { icon = Board.N, head = "KNIGHT",
+                text = "JUMPS IN AN L: TWO SQUARES ONE WAY, THEN ONE TO THE SIDE. "
+                    .. "IT CAN JUMP OVER PIECES." },
             { icon = Board.B, head = "BISHOP", text = "ANY DISTANCE DIAGONALLY." },
             { icon = Board.R, head = "ROOK", text = "ANY DISTANCE UP, DOWN OR SIDEWAYS." },
             { icon = Board.Q, head = "QUEEN", text = "ANY DISTANCE IN ANY STRAIGHT OR DIAGONAL LINE." },
@@ -72,7 +72,8 @@ local STEPS = {
         title = "YOUR FIRST MOVE",
         text = function(self)
             local g = self.g
-            local s = "CLICK ONE OF YOUR PIECES: DOTS SHOW WHERE IT CAN GO. CLICK A DOT TO MOVE, OR DRAG THE PIECE THERE.\n\n"
+            local s = "CLICK ONE OF YOUR PIECES: DOTS SHOW WHERE IT CAN GO. "
+                .. "CLICK A DOT TO MOVE, OR DRAG THE PIECE THERE.\n\n"
                 .. "A GOOD START: PUSH THE PAWN IN FRONT OF YOUR KING OR QUEEN TWO SQUARES."
             if g.match.human == -1 then s = "THE CPU PLAYS WHITE, SO IT MOVES FIRST.\n\n" .. s end
             return s
@@ -96,20 +97,23 @@ local STEPS = {
     },
     {
         title = "SPELL CARDS",
-        text = "THESE ARE YOUR SPELLS. YOU START WITH 3 CARDS AND DRAW ONE MORE AT THE START OF EACH OF YOUR TURNS, UP TO 6.\n\n"
-            .. "HOVER A CARD TO READ WHAT IT DOES. TRY IT NOW!",
+        text = "THESE ARE YOUR SPELLS. YOU START WITH " .. Config.ui.card.startHand
+            .. " CARDS AND DRAW ONE MORE AT THE START OF EACH OF YOUR TURNS, UP TO "
+            .. Config.ui.card.maxHand .. ".\n\nHOVER A CARD TO READ WHAT IT DOES. TRY IT NOW!",
         focus = "slots", box = "right", hold = true, spells = true,
     },
     {
         title = "MANA",
-        text = "SPELLS COST MANA. YOU GAIN 1 MANA AT THE START OF EACH TURN AND CAN STORE UP TO 3.\n\n"
+        text = "SPELLS COST MANA. YOU GAIN 1 MANA AT THE START OF EACH TURN AND CAN STORE UP TO "
+            .. Config.ui.card.maxMana .. ".\n\n"
             .. "THE NUMBER IN THE GEM ON A CARD IS ITS COST. CARDS YOU CAN'T AFFORD YET ARE GREYED OUT.",
         focus = "mana", box = "right", hold = true, spells = true,
     },
     {
         title = "CASTING",
         text = "YOU MAY CAST ONE SPELL PER TURN, BEFORE YOU MOVE.\n\n"
-            .. "CLICK A CARD (OR PRESS 1-6). IF IT NEEDS A TARGET, THE SQUARES YOU CAN PICK LIGHT UP: CLICK ONE. "
+            .. "CLICK A CARD (OR PRESS 1-" .. Config.ui.card.maxHand
+            .. "). IF IT NEEDS A TARGET, THE SQUARES YOU CAN PICK LIGHT UP: CLICK ONE. "
             .. "OTHERWISE PRESS CAST. RIGHT-CLICK OR ESC CANCELS.\n\n"
             .. "CARDS MARKED ENDS TURN ARE YOUR WHOLE TURN: NO MOVE AFTER THEM.",
         focus = "slots", box = "right", hold = true, spells = true,
@@ -157,7 +161,8 @@ local STEPS = {
             if not self.g.match.spells then
                 return "THE RIGHT COLUMN IS THE CPU: ITS NAME, ITS CLOCK AND WHAT IT IS DOING RIGHT NOW."
             end
-            return "THE RIGHT COLUMN IS THE CPU: ITS CLOCK, ITS HAND (FACE DOWN), ITS MANA AND A LOG OF THE SPELLS CAST.\n\n"
+            return "THE RIGHT COLUMN IS THE CPU: ITS CLOCK, ITS HAND (FACE DOWN), "
+                .. "ITS MANA AND A LOG OF THE SPELLS CAST.\n\n"
                 .. "THE CPU CASTS SPELLS TOO. HOVER A LINE IN THE LOG TO READ THAT CARD."
         end,
         focus = "cpu", box = "left", hold = true,
@@ -171,12 +176,15 @@ local STEPS = {
     {
         title = "SPECIAL RULES",
         rows = {
-            { head = "CHECK", text = "YOUR KING IS ATTACKED. YOUR NEXT MOVE MUST SAVE IT: MOVE IT, BLOCK, OR TAKE THE ATTACKER." },
+            { head = "CHECK", text = "YOUR KING IS ATTACKED. YOUR NEXT MOVE MUST SAVE IT: "
+                .. "MOVE IT, BLOCK, OR TAKE THE ATTACKER." },
             { head = "CHECKMATE", text = "A CHECK WITH NO WAY OUT. THE GAME ENDS." },
-            { head = "CASTLING", text = "MOVE YOUR KING TWO SQUARES TOWARD A ROOK; THE ROOK JUMPS OVER. ONLY IF NEITHER HAS MOVED." },
+            { head = "CASTLING", text = "MOVE YOUR KING TWO SQUARES TOWARD A ROOK; "
+                .. "THE ROOK JUMPS OVER. ONLY IF NEITHER HAS MOVED." },
             { head = "PROMOTION", text = "A PAWN THAT REACHES THE FAR ROW BECOMES A QUEEN, ROOK, BISHOP OR KNIGHT." },
             { head = "EN PASSANT", text = "A PAWN THAT JUMPS TWO SQUARES PAST YOURS CAN BE TAKEN AS IF IT MOVED ONE." },
-            { head = "DRAWS", text = "NO LEGAL MOVE BUT NOT IN CHECK, THE SAME POSITION THREE TIMES, OR 50 MOVES WITHOUT A CAPTURE." },
+            { head = "DRAWS", text = "NO LEGAL MOVE BUT NOT IN CHECK, THE SAME POSITION THREE TIMES, OR "
+                .. Config.chess.fiftyMove .. " MOVES WITHOUT A CAPTURE." },
         },
         box = "wide", hold = true,
     },
@@ -184,8 +192,9 @@ local STEPS = {
         title = "CONTROLS",
         rows = {
             { head = "MOUSE", text = "CLICK OR DRAG PIECES. RIGHT-CLICK CANCELS A SELECTION." },
-            { head = "1 - 6", text = "PICK A CARD FROM YOUR HAND.", spells = true },
-            { head = "ESC", text = "CANCEL, THEN PAUSE. THE PAUSE MENU (II, TOP RIGHT) HAS RESTART, SETTINGS AND RESIGN." },
+            { head = "1 - " .. Config.ui.card.maxHand, text = "PICK A CARD FROM YOUR HAND.", spells = true },
+            { head = "ESC", text = "CANCEL, THEN PAUSE. THE PAUSE MENU (II, TOP RIGHT) "
+                .. "HAS RESTART, SETTINGS AND RESIGN." },
         },
         focus = "pause", box = "center", hold = true,
     },
@@ -208,9 +217,12 @@ function T.new(game)
     t.spot = 0
     t.tips, t.seen = {}, {}
     t.tip = nil
-    t.nextBtn = Button.new { x = 0, y = 0, w = 200, h = 56, label = "NEXT", textScale = 2, style = "primary",
+    local buttons = TUT.buttons
+    t.nextBtn = Button.new { x = 0, y = 0, w = buttons.width, h = buttons.height,
+        label = "NEXT", textScale = buttons.textScale, style = "primary",
         hoverShift = 0, onClick = function() t:advance() end }
-    t.skipBtn = Button.new { x = 0, y = 0, w = 200, h = 56, label = "SKIP TUTORIAL", textScale = 2,
+    t.skipBtn = Button.new { x = 0, y = 0, w = buttons.width, h = buttons.height,
+        label = "SKIP TUTORIAL", textScale = buttons.textScale,
         hoverShift = 0, backSound = true, onClick = function() t:skip() end }
     t:advance()
     return t
@@ -247,6 +259,9 @@ end
 function T:skip()
     self:finish()
     self.tipsOff = true
+    if self.g.params then self.g.params.tutorial = false end
+    App.settings.tutorial = false
+    App.save()
 end
 
 function T:holding()
@@ -260,15 +275,25 @@ function T:ensureCastable()
     L:refreshState()
     self.castCard = nil
     for _, cv in ipairs(L.hand[side]) do
-        if cv.ok then self.castCard = cv; break end
+        if cv.ok and not cv.def.endsTurn then self.castCard = cv; break end
     end
     if self.castCard then return end
     if L.manaOf[side] < 1 then L.manaOf[side] = 1 end
     local hand = L.hand[side]
-    if #hand == 0 then L:addCard(side, Defs.bySlug.shield) else hand[1].def = Defs.bySlug.shield end
+    local replace
+    for i, cv in ipairs(hand) do
+        if not cv.def.role then replace = i; break end
+    end
+    replace = replace or (#hand > 0 and 1 or nil)
+    if replace then
+        hand[replace].def = Defs.bySlug.shield
+        self.castCard = hand[replace]
+    else
+        L:addCard(side, Defs.bySlug.shield)
+        self.castCard = hand[#hand]
+    end
     L:dirty()
     L:refreshState()
-    self.castCard = hand[1]
 end
 
 local function stepText(self, s)
@@ -289,11 +314,12 @@ function T:layout()
     local s = self.step
     if not s then return end
 
+    local B = TUT.box
     local x, w, y
-    if s.box == "right" then x, w = 1462, 440
-    elseif s.box == "left" then x, w = 18, 440
-    elseif s.box == "wide" then x, w = 420, 1080
-    else x, w = 560, 800 end
+    if s.box == "right" then x, w = B.right[1], B.right[2]
+    elseif s.box == "left" then x, w = B.left[1], B.left[2]
+    elseif s.box == "wide" then x, w = B.wide[1], B.wide[2]
+    else x, w = B.center[1], B.center[2] end
     self.textW = w - PAD * 2
     local h = PAD + 30 + 20
     if s.rows then
@@ -313,27 +339,28 @@ function T:layout()
     h = h + 24 + 56
     h = h + PAD
     if s.box == "right" or s.box == "left" then
-        y = 300
+        y = TUT.sideY
     else
-        y = floor(540 - h / 2)
-        if s.focus == "pause" then y = 180 end
+        y = floor(Screen.H / 2 - h / 2)
+        if s.focus == "pause" then y = TUT.pauseY end
     end
     self.px, self.py, self.pw, self.ph = x, y, w, h
 
-    local by = y + h - PAD - 56
+    local buttons = TUT.buttons
+    local by = y + h - PAD - buttons.height
     local nb, sb = self.nextBtn, self.skipBtn
     nb.label = s.next or "NEXT"
-    nb.w = max(120, Text.width(nb.label, 2) + 48)
+    nb.w = max(buttons.minWidth, Text.width(nb.label, 2) + buttons.nextPad)
     nb.x, nb.y = x + w - PAD - nb.w, by
     sb.label = s.skip or "SKIP TUTORIAL"
-    sb.w = Text.width(sb.label, 2) + 40
+    sb.w = Text.width(sb.label, 2) + buttons.skipPad
     sb.x, sb.y = x + PAD, by
 end
 
 function T:showTip(key, title, text)
     if self.tipsOff or self.running or self.seen[key] then return end
     self.seen[key] = true
-    local lines = Text.lines(text, BODY, 768 - PAD * 2)
+    local lines = Text.lines(text, BODY, TUT.tip.w - PAD * 2)
     self.tips[#self.tips + 1] = { title = title, lines = lines, t = 0 }
 end
 
@@ -351,7 +378,8 @@ function T:watchTips()
     local me = m.human
     local mine = m.board.side == me
     if mine and m.check then
-        self:showTip("check", "YOU ARE IN CHECK", "YOUR KING IS ATTACKED. MOVE IT, BLOCK THE ATTACK OR CAPTURE THE ATTACKER.")
+        self:showTip("check", "YOU ARE IN CHECK",
+            "YOUR KING IS ATTACKED. MOVE IT, BLOCK THE ATTACK OR CAPTURE THE ATTACKER.")
     end
     if g.view.promo then
         self:showTip("promo", "PROMOTION", "PICK WHAT YOUR PAWN BECOMES. THE QUEEN IS USUALLY THE BEST CHOICE.")
@@ -397,7 +425,7 @@ function T:update(dt, mx, my)
         local tip = self.tips[1]
         if tip then
             tip.t = tip.t + dt
-            if tip.t > 9 then table.remove(self.tips, 1) end
+            if tip.t > TUT.tipLife then table.remove(self.tips, 1) end
         end
     end
 end
@@ -406,7 +434,7 @@ function T:tipRect()
     local tip = self.tips[1]
     if not tip then return nil end
     local h = PAD * 2 + 30 + 14 + #tip.lines * LINE + 28
-    return 576, 18, 768, h
+    return TUT.tip.x, TUT.tip.y, TUT.tip.w, h
 end
 
 function T:mousepressed(x, y, b)
@@ -462,17 +490,17 @@ function T:drawSpotlight(s)
     if r and a > 0.01 then
         local x, y, w, h = r[1], r[2], r[3], r[4]
         Pal.set(Pal.N, 0.62 * a)
-        rect(0, 0, 1920, y)
-        rect(0, y + h, 1920, 1080 - y - h)
+        rect(0, 0, Screen.W, y)
+        rect(0, y + h, Screen.W, Screen.H - y - h)
         rect(0, y, x, h)
-        rect(x + w, y, 1920 - x - w, h)
+        rect(x + w, y, Screen.W - x - w, h)
     elseif a > 0.01 then
         Pal.set(Pal.N, 0.62 * a)
-        rect(0, 0, 1920, 1080)
+        rect(0, 0, Screen.W, Screen.H)
     end
     if s.hold and not r then
         Pal.set(Pal.N, 0.62 * (1 - a))
-        rect(0, 0, 1920, 1080)
+        rect(0, 0, Screen.W, Screen.H)
     end
     if r then
 
@@ -492,7 +520,7 @@ function T:drawDots(x, y)
             if i == self.i then k = n end
         end
     end
-    local gap = 18
+    local gap = TUT.dotsGap
     local x0 = x - (n - 1) * gap / 2
     for j = 1, n do
         Frame.diamond(x0 + (j - 1) * gap, y, j == k and 6 or 4, j <= k and Pal.C or Pal.I)
@@ -548,7 +576,8 @@ function T:drawPanel(s)
         end
     elseif not s.hold then
 
-        Text.print("YOUR MOVE", x + w - PAD, y + h - PAD - 36, 2, floor(self.time * 2) % 2 == 0 and Pal.C or Pal.B, "right")
+        local col = floor(self.time * 2) % 2 == 0 and Pal.C or Pal.B
+        Text.print("YOUR MOVE", x + w - PAD, y + h - PAD - 36, 2, col, "right")
     end
     lg.pop()
 
@@ -561,8 +590,8 @@ function T:drawTip()
     local tip = self.tips[1]
     if not tip then return end
     local x, y, w, h = self:tipRect()
-    local a = min(1, tip.t * 5, (9 - tip.t) * 3)
-    local slide = floor((1 - min(1, tip.t * 5)) * -30)
+    local a = min(1, tip.t * TUT.tipFadeIn, (TUT.tipLife - tip.t) * TUT.tipFadeOut)
+    local slide = floor((1 - min(1, tip.t * TUT.tipFadeIn)) * -TUT.tipSlide)
     y = y + slide
     Pal.set(Pal.N, 0.8 * a)
     rect(x + 8, y + 8, w, h)

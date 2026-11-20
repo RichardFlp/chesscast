@@ -1,3 +1,4 @@
+local Config = require("src.config")
 local Screen = require("src.utils.screen")
 local M = require("src.states.manager")
 local Button = require("src.ui.button")
@@ -15,24 +16,24 @@ local App = require("src.app")
 local Menu = {}
 
 function Menu:init()
-    local bw, x = 600, 960 - 300
-    local y0, gap = 540, 92
+    local bw, x = Config.ui.menu.width, Screen.W / 2 - Config.ui.menu.width / 2
+    local y0, gap = Config.ui.menu.y, Config.ui.menu.gap
     self.buttons = {
-        Button.new { x = x, y = y0, w = bw, h = 80, label = "CAMPAIGN", style = "primary", tag = "NEW",
-            onClick = function() M.switch("campaign") end },
-        Button.new { x = x, y = y0 + gap, w = bw, h = 80, label = "CLASSIC", tag = "VS CPU",
+        Button.new { x = x, y = y0, w = bw, h = Config.ui.menu.height, label = "CAMPAIGN",
+            style = "primary", tag = "NEW", onClick = function() M.switch("campaign") end },
+        Button.new { x = x, y = y0 + gap, w = bw, h = Config.ui.menu.height, label = "CLASSIC", tag = "VS CPU",
             onClick = function() M.switch("setup") end },
-        Button.new { x = x, y = y0 + gap * 2, w = bw, h = 80, label = "MULTIPLAYER CLASSIC",
+        Button.new { x = x, y = y0 + gap * 2, w = bw, h = Config.ui.menu.height, label = "MULTIPLAYER CLASSIC",
             onClick = function() M.switch("multiplayer") end },
-        Button.new { x = x, y = y0 + gap * 3, w = bw, h = 80, label = "SETTINGS",
+        Button.new { x = x, y = y0 + gap * 3, w = bw, h = Config.ui.menu.height, label = "SETTINGS",
             onClick = function() M.switch("settings", { back = "menu" }) end },
-        Button.new { x = x, y = y0 + gap * 4, w = bw, h = 80, label = "QUIT", backSound = true,
+        Button.new { x = x, y = y0 + gap * 4, w = bw, h = Config.ui.menu.height, label = "QUIT", backSound = true,
             onClick = function() love.event.quit() end },
     }
     if App.WEB then self.buttons[5] = nil end
-    self.buttons[1].h = 88
+    self.buttons[1].h = Config.ui.menu.campaignHeight
     self.focus = W.Focus.new(self.buttons)
-    self.fx = Particles.new(300)
+    self.fx = Particles.new(Config.ui.menu.fx)
 end
 
 function Menu:enter()
@@ -46,31 +47,38 @@ function Menu:update(dt, mx, my)
     BG.update(dt)
     for _, b in ipairs(self.buttons) do b:update(dt, mx, my) end
 
-    if love.math.random() < dt * 14 then
-        self.fx:add(560 + love.math.random() * 800, 150 + love.math.random() * 150, (love.math.random() - 0.5) * 40,
-            -20 - love.math.random() * 40, 1 + love.math.random(), 4, love.math.random() < 0.5 and Pal.C or Pal.B, -10, 0.5, 1)
+    if love.math.random() < dt * Config.ui.menu.spawnRate then
+        local x = 560 + love.math.random() * 800
+        local y = 150 + love.math.random() * 150
+        local vx = (love.math.random() - 0.5) * 40
+        local col = love.math.random() < 0.5 and Pal.C or Pal.B
+        self.fx:add(x, y, vx, -20 - love.math.random() * 40,
+            1 + love.math.random(), 4, col, -10, 0.5, 1)
     end
     self.fx:update(dt)
 end
 
 function Menu:draw()
     BG.draw()
-    Logo.draw(960, 130, self.t)
+    Logo.draw(Screen.W / 2, Config.ui.menu.logoY, self.t)
     self.fx:draw()
     local tag = "A CHESS GAME WITH SPELLS"
     local tw = Text.width(tag, 2) + 100
     love.graphics.setColor(1, 1, 1, 1)
-    A.ui.panel_small:draw(960 - tw / 2, 420, tw, 46, 2)
-    Text.print(tag, 960, 436, 2, Pal.C, "center", Pal.N)
-    Frame.diamond(960 - tw / 2 + 26, 443, 6, Pal.B)
-    Frame.diamond(960 + tw / 2 - 26, 443, 6, Pal.B)
+    local menu = Config.ui.menu
+    A.ui.panel_small:draw(Screen.W / 2 - tw / 2, menu.tagY, tw, menu.tagH, 2)
+    Text.print(tag, Screen.W / 2, menu.tagTextY, 2, Pal.C, "center", Pal.N)
+    Frame.diamond(Screen.W / 2 - tw / 2 + 26, menu.tagTextY + 7, 6, Pal.B)
+    Frame.diamond(Screen.W / 2 + tw / 2 - 26, menu.tagTextY + 7, 6, Pal.B)
     for _, b in ipairs(self.buttons) do b:draw() end
     Pal.set(Pal.N)
-    love.graphics.rectangle("fill", 0, 1028, 1920, 52)
+    love.graphics.rectangle("fill", 0, Screen.H - Config.ui.footer, Screen.W, Config.ui.footer)
     if not Screen.lite then
-        Text.print(App.WEB and "ARROWS + ENTER OR MOUSE" or "ARROWS + ENTER OR MOUSE    F11 FULLSCREEN", 40, 1046, 2, Pal.B, "left")
+        local hint = App.WEB and "ARROWS + ENTER OR MOUSE"
+            or "ARROWS + ENTER OR MOUSE    F11 FULLSCREEN"
+        Text.print(hint, menu.hintX, menu.footerTextY, 2, Pal.B, "left")
     end
-    Text.print("V 1.0", 1880, 1046, 2, Pal.B, "right")
+    Text.print("V " .. Config.app.release, Screen.W - menu.footerInset, menu.footerTextY, 2, Pal.B, "right")
 end
 
 function Menu:mousemoved() self.focus:clearIfMouse() end

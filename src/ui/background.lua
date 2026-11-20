@@ -1,3 +1,4 @@
+local Config = require("src.config")
 local A = require("src.assets.assets")
 local Pal = require("src.utils.palette")
 local Screen = require("src.utils.screen")
@@ -18,6 +19,7 @@ extern vec3 ring;
 extern float ringPow;
 extern float px;
 extern float dcell;
+extern vec2 focus;
 extern vec2 off;
 extern vec4 cN;
 extern vec4 cI;
@@ -27,7 +29,7 @@ extern vec4 cC;
 float waves(HP vec2 p, HP float t) {
     HP float h = sin(p.x * 0.0090 + p.y * 0.0035 + t * 0.90);
     h += sin(p.x * -0.0055 + p.y * 0.0100 + t * 1.25) * 0.80;
-    h += sin(length((p - vec2(960.0, 1600.0)) * 0.01) * 1.6 - t * 1.60) * 0.60;
+    h += sin(length((p - focus) * 0.01) * 1.6 - t * 1.60) * 0.60;
     h += sin(p.x * 0.0190 - p.y * 0.0150 - t * 2.10) * 0.35;
     return h / 2.55;
 }
@@ -53,35 +55,37 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
 }
 ]]
 
-local shader, waveCanvas
+local shader, waveCanvas, waveW, waveH, waveScale
 local phase, boost = 0, 0
 local ring = { -9999, -9999, 99 }
 local ringPow = 0
 local t = 0
 local motes
+local B = Config.ui.background
 local MOTE_COLS = { Pal.C, Pal.B, Pal.B, Pal.I }
-local pieces = {
-    { side = 1, t = 6, x = 150, y = 600, s = 10, ph = 0.0 },
-    { side = -1, t = 5, x = 1500, y = 560, s = 10, ph = 1.7 },
-    { side = 1, t = 3, x = 80, y = 250, s = 5, ph = 2.4 },
-    { side = -1, t = 2, x = 1720, y = 200, s = 5, ph = 0.9 },
-    { side = 1, t = 1, x = 400, y = 860, s = 4, ph = 3.1 },
-    { side = -1, t = 4, x = 1400, y = 880, s = 4, ph = 4.0 },
-}
+local pieces = B.pieces
 
 function BG.init()
-    motes = Particles.new(400)
+    motes = Particles.new(B.motes)
     local ok, sh = pcall(love.graphics.newShader, WAVES)
     if ok then
         shader = sh
         shader:send("bayer", Screen.bayer)
         if Screen.lite then
-            waveCanvas = love.graphics.newCanvas(512, 302, { dpiscale = 1 })
-            waveCanvas:setFilter("nearest", "nearest")
-            shader:send("px", 4); shader:send("dcell", 4); shader:send("off", { -64, -64 })
+            waveW, waveH, waveScale = B.liteW, B.liteH, B.liteScale
+            shader:send("dcell", B.liteScale)
         else
-            shader:send("px", 1); shader:send("dcell", 2); shader:send("off", { 0, 0 })
+            -- The wave field and its dither both repeat inside each source block.
+            -- A half-size canvas contains every distinct value, so the upscale is
+            -- pixel-identical while evaluating one quarter of the fragments.
+            waveW, waveH, waveScale = math.ceil(B.w / B.renderScale), math.ceil(B.h / B.renderScale), B.renderScale
+            shader:send("dcell", Config.ui.ditherCell)
         end
+        waveCanvas = love.graphics.newCanvas(waveW, waveH, { dpiscale = 1 })
+        waveCanvas:setFilter("nearest", "nearest")
+        shader:send("px", waveScale)
+        shader:send("off", { -B.pad, -B.pad })
+        shader:send("focus", { B.focusX, B.focusY })
         shader:send("cN", Pal.N); shader:send("cI", Pal.I)
         shader:send("cB", Pal.B); shader:send("cC", Pal.C)
     else
@@ -105,9 +109,12 @@ function BG.update(dt)
     ringPow = ringPow * k
     ring[3] = ring[3] + dt
     if love.math.random() < dt * 30 then
-        motes:add(love.math.random() * 1920, 1100, (love.math.random() - 0.5) * 20, -30 - love.math.random() * 60,
-            6 + love.math.random() * 8, love.math.random() < 0.2 and 6 or 4,
-            MOTE_COLS[love.math.random(#MOTE_COLS)], 0, 0, 1)
+        local x = love.math.random() * Screen.W
+        local vx = (love.math.random() - 0.5) * 20
+        local life = 6 + love.math.random() * 8
+        local size = love.math.random() < 0.2 and 6 or 4
+        motes:add(x, Screen.H + 20, vx, -30 - love.math.random() * 60,
+            life, size, MOTE_COLS[love.math.random(#MOTE_COLS)], 0, 0, 1)
     end
     motes:update(dt)
 end
@@ -124,29 +131,29 @@ function BG.draw(dim)
             love.graphics.origin()
             love.graphics.setCanvas(waveCanvas)
             love.graphics.setShader(shader)
-            love.graphics.rectangle("fill", 0, 0, 512, 302)
+            love.graphics.rectangle("fill", 0, 0, waveW, waveH)
             love.graphics.pop()
             love.graphics.setShader()
-            love.graphics.draw(waveCanvas, -64, -64, 0, 4, 4)
+            love.graphics.draw(waveCanvas, -B.pad, -B.pad, 0, waveScale, waveScale)
         else
             love.graphics.setShader(shader)
-            love.graphics.rectangle("fill", -64, -64, 2048, 1208)
+            love.graphics.rectangle("fill", -B.pad, -B.pad, B.w, B.h)
         end
         love.graphics.setShader(Screen.shader)
     else
         Pal.set(Pal.I)
-        love.graphics.rectangle("fill", -64, -64, 2048, 1208)
+        love.graphics.rectangle("fill", -B.pad, -B.pad, B.w, B.h)
         Pal.set(Pal.B, 0.35)
-        for i = 0, 8 do
-            local y = (i * 130 + phase * 40) % 1300 - 100
-            love.graphics.rectangle("fill", 0, math.floor(y / 4) * 4, 1920, 24)
+        for i = 0, B.stripeCount do
+            local y = (i * B.stripeGap + phase * B.stripeSpeed) % B.stripeSpan - B.stripeOffset
+            love.graphics.rectangle("fill", 0, math.floor(y / 4) * 4, Screen.W, B.stripeH)
         end
     end
 
-    for i = 0, 5 do
+    for i = 0, B.edgeBands do
         Pal.set(Pal.N, 0.75 - i * 0.12)
-        love.graphics.rectangle("fill", 0, i * 16, 1920, 16)
-        love.graphics.rectangle("fill", 0, 1080 - (i + 1) * 16, 1920, 16)
+        love.graphics.rectangle("fill", 0, i * B.edgeBand, Screen.W, B.edgeBand)
+        love.graphics.rectangle("fill", 0, Screen.H - (i + 1) * B.edgeBand, Screen.W, B.edgeBand)
     end
 
     for _, p in ipairs(pieces) do
@@ -167,7 +174,7 @@ function BG.draw(dim)
 
     if dim then
         Pal.set(Pal.N, dim)
-        love.graphics.rectangle("fill", 0, 0, 1920, 1080)
+        love.graphics.rectangle("fill", 0, 0, Screen.W, Screen.H)
     end
 end
 

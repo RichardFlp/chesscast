@@ -1,8 +1,9 @@
+local Config = require("src.config")
 local Board = require("src.chess.board")
 local Defs = require("src.cards.defs")
 local S = require("src.cards.spells")
+local Layer = require("src.cards.layer")
 local OPENING = S.OPENING
-S.OPENING = 0
 
 local T = {}
 local P, N, B, R, Q, K = Board.P, Board.N, Board.B, Board.R, Board.Q, Board.K
@@ -326,6 +327,206 @@ case("one spell per turn and mana", function()
     ok, why = S.castable(b, 1, Defs.bySlug.haste, L, {})
     return not ok and why == "NOT ENOUGH MANA"
 end)
+case("spells refuse impossible targets", function()
+    local b = Board.fromFEN(Board.START_FEN)
+    local def = Defs.bySlug.teleport
+    local king = S.check(b, 1, def, sqn("e1"), sqn("e3"), {})
+    local occupied = S.check(b, 1, def, sqn("b1"), sqn("e1"), {})
+    local valid = S.check(b, 1, def, sqn("b1"), sqn("d4"), {})
+    return not king and not occupied and valid ~= nil
+end)
+case("fog of war limits distant checks", function()
+    local b = Board.fromFEN("k3r3/8/8/8/8/8/8/4K3 w - - 0 1")
+    if not b:inCheck(1) then return false end
+    local ok, nb = S.check(b, 1, Defs.bySlug.fog_of_war, nil, nil, {})
+    return ok and not nb:inCheck(1)
+end)
+case("fog of war keeps close checks", function()
+    local b = Board.fromFEN("k7/8/8/8/8/4r3/8/4K3 w - - 0 1")
+    if not b:inCheck(1) then return false end
+    local ok, nb = S.check(b, 1, Defs.bySlug.fog_of_war, nil, nil, {})
+    return ok and nb:inCheck(1)
+end)
+case("magnetic pull skips protected pieces", function()
+    local b = Board.fromFEN(Board.START_FEN)
+    b:setStatus(b.id[sqn("e7")], "shield", b.ply + 4)
+    return not contains(S.firstTargets(b, 1, Defs.bySlug.magnetic_pull, {}), sqn("e7"))
+end)
+case("teleport keeps pawns off the back ranks", function()
+    local b = Board.fromFEN(Board.START_FEN)
+    local targets = S.secondTargets(b, 1, Defs.bySlug.teleport, sqn("e2"), {})
+    for _, s in ipairs(targets) do
+        if Board.RANK[s] == 0 or Board.RANK[s] == 7 then return false end
+    end
+    return #targets > 0
+end)
+case("teleport keeps pawned pieces off the back ranks", function()
+    local b = Board.fromFEN("4k3/8/8/8/8/8/4Q3/4K3 w - - 0 1")
+    b:setStatus(b.id[sqn("e2")], "pawned", b.ply + 6)
+    local targets = S.secondTargets(b, 1, Defs.bySlug.teleport, sqn("e2"), {})
+    for _, s in ipairs(targets) do
+        if Board.RANK[s] == 0 or Board.RANK[s] == 7 then return false end
+    end
+    return #targets > 0
+end)
+case("swap keeps pawned pieces off the back ranks", function()
+    local b = Board.fromFEN("4k3/8/8/8/8/2B5/4Q3/R3K2R w KQ - 0 1")
+    b:setStatus(b.id[sqn("e2")], "pawned", b.ply + 6)
+    local targets = S.secondTargets(b, 1, Defs.bySlug.swap, sqn("e2"), {})
+    for _, s in ipairs(targets) do
+        if Board.RANK[s] == 0 or Board.RANK[s] == 7 then return false end
+    end
+    return #targets > 0
+end)
+case("magnetic pull keeps pawned pieces off the back ranks", function()
+    local b = Board.fromFEN("k7/7K/8/8/8/8/4q3/8 w - - 0 1")
+    b:setStatus(b.id[sqn("e2")], "pawned", b.ply + 6)
+    return not contains(S.firstTargets(b, 1, Defs.bySlug.magnetic_pull, {}), sqn("e2"))
+end)
+case("capturing a pawned piece clears its status", function()
+    local b = Board.fromFEN("4k3/8/8/3q4/8/8/3R4/4K3 w - - 0 1")
+    local id = b.id[sqn("d5")]
+    b:setStatus(id, "pawned", b.ply + 6)
+    play(b, "d2d5")
+    local c = b.captured[-1][1]
+    return b.st[id] == nil and c and c.pawned == true and c.t == Q
+end)
+case("haste needs an empty forward square", function()
+    local b = Board.fromFEN("4k3/8/8/4p3/4P3/8/8/4K3 w - - 0 1")
+    return not contains(S.firstTargets(b, 1, Defs.bySlug.haste, {}), sqn("e4"))
+end)
+case("haste cannot promote on the last rank", function()
+    local b = Board.fromFEN("4k3/4P3/8/8/8/8/8/4K3 w - - 0 1")
+    return #S.firstTargets(b, 1, Defs.bySlug.haste, {}) == 0
+end)
+case("meteor never targets a queen", function()
+    local b = Board.fromFEN("3qk3/8/8/8/8/8/8/4K3 w - - 0 1")
+    return not contains(S.firstTargets(b, 1, Defs.bySlug.meteor, {}), sqn("d8"))
+end)
+case("freeze never targets the king", function()
+    local b = Board.fromFEN("4k3/8/8/8/8/8/8/4K3 w - - 0 1")
+    return #S.firstTargets(b, 1, Defs.bySlug.freeze, {}) == 0
+end)
+case("reverse gravity with no legal retreat fails", function()
+    local b = Board.fromFEN("4k3/4p3/4p3/8/8/8/8/4K3 w - - 0 1")
+    return not S.check(b, 1, Defs.bySlug.reverse_gravity, nil, nil, {})
+end)
+case("shield expires after its duration", function()
+    local b, L = fen("4k3/8/8/4p3/3N4/8/8/4K3 w - - 0 1")
+    if not cast(L, "shield", "d4") then return false end
+    local s = sqn("d4")
+    if not b:isProtected(s) then return false end
+    b.ply = b.ply + 3; b:removeExpired()
+    local active = b:isProtected(s)
+    b.ply = b.ply + 1; b:removeExpired()
+    return active and not b:isProtected(s)
+end)
+case("freeze expires after one enemy turn", function()
+    local b, L = fen(Board.START_FEN)
+    if not cast(L, "freeze", "b8") then return false end
+    local id = b.id[sqn("b8")]
+    b.ply = b.ply + 1; b:removeExpired()
+    local active = b:status(id, "frozen")
+    b.ply = b.ply + 1; b:removeExpired()
+    return active and not b:status(id, "frozen")
+end)
+case("fog expiry restores slider range", function()
+    local b, L = fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1")
+    if not cast(L, "fog_of_war") then return false end
+    local untilPly = b.fog[-1]
+    b.ply = untilPly - 1
+    if not (b.fog[-1] > b.ply) then return false end
+    b.ply = untilPly
+    return not (b.fog[-1] > b.ply)
+end)
+case("sanctuary expires", function()
+    local b, L = fen("4k3/8/8/4p3/3N4/8/8/4K3 w - - 0 1")
+    if not cast(L, "sanctuary", "c3") then return false end
+    local z = b.zones[1]
+    if not z then return false end
+    b.ply = z.untilPly - 1; b:removeExpired()
+    if #b.zones == 0 then return false end
+    b.ply = z.untilPly; b:removeExpired()
+    return #b.zones == 0
+end)
+case("time rewind needs a past turn", function()
+    local b, L = fen(Board.START_FEN)
+    b.ply = 10
+    return not cast(L, "time_rewind")
+end)
+case("last stand needs an adjacent piece", function()
+    local b, L = fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1")
+    b.ply = 10
+    return not S.castable(b, 1, Defs.bySlug.last_stand, L, {})
+end)
+case("double strike opens on move six", function()
+    local b, L = fen(Board.START_FEN)
+    b.ply = 9
+    local early = S.castable(b, 1, Defs.bySlug.double_strike, L, {})
+    b.ply = 10
+    local late = S.castable(b, 1, Defs.bySlug.double_strike, L, {})
+    return not early and late and cast(L, "double_strike") and L.double[1] == true
+end)
+case("jester's curse pawns every enemy piece except the king", function()
+    local b, L = fen("4k3/8/8/3q4/8/8/8/4K3 w - - 0 1")
+    if not cast(L, "jesters_curse") then return false end
+    local q, k = sqn("d5"), sqn("e8")
+    if b.p[q] ~= -Q or b.p[k] ~= -K then return false end
+    if not b:status(b.id[q], "pawned") or b:status(b.id[k], "pawned") then return false end
+    if b.side ~= -1 then return false end
+    return hasMove(b, q, sqn("d4")) and not hasMove(b, q, sqn("d1"))
+end)
+case("jester's curse reverts after three enemy turns", function()
+    local b, L = fen("4k3/8/8/3q4/8/8/8/4K3 w - - 0 1")
+    if not cast(L, "jesters_curse") then return false end
+    local q, id = sqn("d5"), b.id[sqn("d5")]
+    local untilPly = b.st[id].pawned
+    b.ply = untilPly - 1
+    b:removeExpired()
+    if not b:status(id, "pawned") or hasMove(b, q, sqn("d1")) then return false end
+    b.ply = untilPly
+    b:removeExpired()
+    return not b:status(id, "pawned") and b.p[q] == -Q and hasMove(b, q, sqn("d1"))
+end)
+case("jester's curse leaves enemy pawns alone", function()
+    local b, L = fen("4k3/4p3/8/3q4/8/8/8/4K3 w - - 0 1")
+    if not cast(L, "jesters_curse") then return false end
+    local p = sqn("e7")
+    return b.p[p] == -P and not b:status(b.id[p], "pawned") and hasMove(b, p, sqn("e5"))
+end)
+case("jester's curse removes the rook's check", function()
+    local b, L = fen("4r2k/8/8/8/8/8/8/4K3 w - - 0 1")
+    if not b:inCheck(1) or not cast(L, "jesters_curse") then return false end
+    local r = sqn("e8")
+    return not b:inCheck(1) and b.p[r] == -R and b:status(b.id[r], "pawned")
+end)
+case("a pawned rook attacks diagonally", function()
+    local b = Board.fromFEN("7k/8/8/3r4/4K3/8/8/8 w - - 0 1")
+    b:setStatus(b.id[sqn("d5")], "pawned", b.ply + 6)
+    return b:isAttacked(sqn("e4"), -1) and not b:isAttacked(sqn("d1"), -1)
+end)
+case("a pawned piece cannot promote", function()
+    local b = Board.fromFEN("4k3/8/8/8/8/8/1r6/4K3 b - - 0 1")
+    local s = sqn("b2")
+    b:setStatus(b.id[s], "pawned", b.ply + 6)
+    return not hasMove(b, s, sqn("b1"))
+end)
+case("a pawned rook cannot castle", function()
+    local b = Board.fromFEN("4k3/8/8/8/8/8/8/4K2R w K - 0 1")
+    b:setStatus(b.id[sqn("h1")], "pawned", b.ply + 6)
+    local list, n = b:legalMoves({})
+    for i = 1, n do if Board.flag(list[i]) == 3 then return false end end
+    return true
+end)
+case("pawned status survives cloning and expires", function()
+    local b = Board.fromFEN("4k3/8/8/3q4/8/8/8/4K3 w - - 0 1")
+    b:setStatus(b.id[sqn("d5")], "pawned", b.ply + 2)
+    local c = b:clone()
+    if not c:status(c.id[sqn("d5")], "pawned") then return false end
+    c.ply = c.ply + 2
+    c:removeExpired()
+    return not c:status(c.id[sqn("d5")], "pawned")
+end)
 
 local FUZZ_FENS = {
     Board.START_FEN,
@@ -367,7 +568,9 @@ local function fuzz(log, seed, plies, cap)
                         if def.steps == 1 then
                             combos[#combos + 1] = { a }
                         else
-                            for _, c in ipairs(sample(def.pick2(b, side, a, ctx), 3)) do combos[#combos + 1] = { a, c } end
+                            for _, c in ipairs(sample(def.pick2(b, side, a, ctx), 3)) do
+                                combos[#combos + 1] = { a, c }
+                            end
                         end
                     end
                 end
@@ -425,21 +628,51 @@ end
 function T.run(log)
     log = log or print
     local ok = true
+    local previousOpening = S.OPENING
+    S.OPENING = 0
 
     local missing = 0
+    local seenSlug, seenName, schools = {}, {}, {}
     for _, def in ipairs(Defs.list) do
-        local art = love.filesystem.getInfo("assets/cards/" .. def.slug .. ".png")
+        local art = love.filesystem.getInfo(Config.assets.cards .. def.slug .. ".png")
         if not def.available or not art then
             log("card " .. def.slug .. ": " .. (def.available and "missing art" or "UNAVAILABLE"))
             missing = missing + 1
         end
+        if seenSlug[def.slug] then log("duplicate card slug: " .. def.slug); ok = false end
+        if seenName[def.name] then log("duplicate card name: " .. def.name); ok = false end
+        seenSlug[def.slug], seenName[def.name] = true, true
+        schools[def.school] = (schools[def.school] or 0) + 1
     end
-    if #Defs.list ~= 24 then log("expected 24 cards, got " .. #Defs.list); ok = false end
+    if #Defs.list == 0 then log("no cards defined"); ok = false end
     if missing > 0 then ok = false end
-    local schools = {}
-    for _, def in ipairs(Defs.list) do schools[def.school] = (schools[def.school] or 0) + 1 end
+    local standard, roleCards = 0, 0
+    for _, def in ipairs(Defs.list) do
+        if def.role then roleCards = roleCards + 1 else standard = standard + 1 end
+    end
+    if #Defs.roles == 0 then log("no role cards defined"); ok = false end
+    if #Defs.deck ~= standard or #Defs.roles ~= roleCards or #Defs.deck + #Defs.roles ~= #Defs.list then
+        log("standard and role decks do not partition Defs.list")
+        ok = false
+    end
+    for _, def in ipairs(Defs.deck) do
+        if def.role then log("role card in standard deck: " .. def.slug); ok = false end
+    end
+    local piles = setmetatable({ discard = { [1] = {} } }, Layer)
+    piles:discardCard(1, Defs.roles[1])
+    if #piles.discard[1] ~= 0 then log("role card entered discard pile"); ok = false end
+    piles:discardCard(1, Defs.deck[1])
+    if #piles.discard[1] ~= 1 or piles.discard[1][1] ~= Defs.deck[1] then
+        log("standard card missing from discard pile")
+        ok = false
+    end
     for _, sc in ipairs(Defs.SCHOOLS) do
-        if schools[sc] ~= 6 then log("school " .. sc .. " has " .. tostring(schools[sc]) .. " cards"); ok = false end
+        if not schools[sc] then log("school " .. sc .. " has no cards"); ok = false end
+    end
+    for school in pairs(schools) do
+        if not table.concat(Defs.SCHOOLS, " "):find(school, 1, true) then
+            log("unknown card school: " .. tostring(school)); ok = false
+        end
     end
 
     local passed = 0
@@ -459,6 +692,7 @@ function T.run(log)
         if not fuzz(log, seed, 70, 10) then ok = false; break end
     end
     log(string.format("cards fuzz took %.1fs", os.clock() - t0))
+    S.OPENING = previousOpening
     return ok
 end
 

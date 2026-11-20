@@ -1,26 +1,24 @@
+local Config = require("src.config")
+
 local Save = {}
 
-Save.FILE = "settings.lua"
+Save.FILE = Config.app.saveFile
 
-Save.defaults = {
-    master = 0.8,
-    music = 0.6,
-    sfx = 0.8,
-    fullscreen = false,
-    resolution = 2,
-    anim = 2,
-    difficulty = 2,
-    spells = true,
-    clock = 3,
-    tutorial = true,
-    nickname = "",
-    campaign = 0,
-}
+Save.defaults = Config.settings.defaults
+Save.RESOLUTIONS = Config.settings.resolutions
+Save.CLOCKS = Config.settings.clocks
+Save.ANIM = Config.settings.anim
+Save.ANIM_SCALE = Config.settings.animScale
 
-Save.RESOLUTIONS = { { 1280, 720 }, { 1600, 900 }, { 1920, 1080 }, { 2560, 1440 } }
-Save.CLOCKS = { { "3 MIN", 180 }, { "5 MIN", 300 }, { "10 MIN", 600 }, { "15 MIN", 900 }, { "NONE", 0 } }
-Save.ANIM = { "LOW", "NORMAL", "HIGH" }
-Save.ANIM_SCALE = { 0.35, 1, 1.5 }
+local function valid(k, v)
+    if Save.defaults[k] == nil or type(v) ~= type(Save.defaults[k]) then return false end
+    if type(v) == "number" then return math.abs(v) < math.huge end
+    return true
+end
+
+local function whole(value, low, high)
+    return math.max(low, math.min(high, math.floor(value)))
+end
 
 function Save.load()
     local s = {}
@@ -31,14 +29,18 @@ function Save.load()
         local ok2, data = pcall(chunk)
         if ok2 and type(data) == "table" then
             for k, v in pairs(data) do
-                if Save.defaults[k] ~= nil and type(v) == type(Save.defaults[k]) then s[k] = v end
+                if valid(k, v) then s[k] = v end
             end
         end
     end
-    s.resolution = math.max(1, math.min(#Save.RESOLUTIONS, s.resolution))
-    s.clock = math.max(1, math.min(#Save.CLOCKS, s.clock))
-    s.anim = math.max(1, math.min(3, s.anim))
-    s.difficulty = math.max(1, math.min(3, s.difficulty))
+    for _, key in ipairs({ "master", "music", "sfx" }) do
+        s[key] = math.max(0, math.min(1, s[key]))
+    end
+    s.resolution = whole(s.resolution, 1, #Save.RESOLUTIONS)
+    s.clock = whole(s.clock, 1, #Save.CLOCKS)
+    s.anim = whole(s.anim, 1, #Save.ANIM)
+    s.difficulty = whole(s.difficulty, 1, #Config.ai.levels)
+    s.campaign = math.max(0, math.floor(s.campaign))
     return s
 end
 
@@ -49,11 +51,15 @@ function Save.write(s)
     table.sort(keys)
     for _, k in ipairs(keys) do
         local v = s[k]
-        lines[#lines + 1] = string.format("  %s = %s,", k, type(v) == "number" and string.format("%.3f", v):gsub("%.?0+$", "")
-            or type(v) == "string" and string.format("%q", v) or tostring(v))
+        local value = type(v) == "number" and string.format("%.3f", v):gsub("%.?0+$", "")
+            or type(v) == "string" and string.format("%q", v) or tostring(v)
+        lines[#lines + 1] = string.format("  %s = %s,", k, value)
     end
     lines[#lines + 1] = "}"
-    pcall(love.filesystem.write, Save.FILE, table.concat(lines, "\n") .. "\n")
+    local ok, wrote, err = pcall(love.filesystem.write, Save.FILE, table.concat(lines, "\n") .. "\n")
+    if not ok then print("settings save failed: " .. tostring(wrote))
+    elseif not wrote then print("settings save failed: " .. tostring(err)) end
+    return ok and wrote
 end
 
 return Save

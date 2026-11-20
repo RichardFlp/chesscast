@@ -1,9 +1,13 @@
 local Board = require("src.chess.board")
+local Config = require("src.config")
 
 local Match = {}
 Match.__index = Match
 
-local abs = math.abs
+local VALUE = {}
+for i = Board.P, Board.K do
+    VALUE[i] = math.floor(Board.VALUE[i] / Board.VALUE_SCALE + 0.5)
+end
 
 function Match.new(opts)
     local m = setmetatable({}, Match)
@@ -30,8 +34,10 @@ function Match.new(opts)
     m.lastMove = nil
     m.legal = {}
     m.legalN = 0
+    m.lastKey = nil
     m:recordPosition()
     m:refresh()
+    m:checkResult()
     return m
 end
 
@@ -44,7 +50,24 @@ function Match:sideToMove() return self.board.side end
 function Match:recordPosition()
     local k = self.board:key()
     self.reps[k] = (self.reps[k] or 0) + 1
+    self.lastKey = k
     return self.reps[k]
+end
+
+function Match:notePosition()
+    local k = self.board:key()
+    if k ~= self.lastKey then self:recordPosition() end
+    return self.reps[k] or 0
+end
+
+function Match:rewind(hist, reps)
+    local h = self.history
+    for i = #h, (hist or #h) + 1, -1 do h[i] = nil end
+    if reps then
+        self.reps = {}
+        for k, v in pairs(reps) do self.reps[k] = v end
+    end
+    self.lastKey = self.board:key()
 end
 
 function Match:refresh()
@@ -108,6 +131,7 @@ end
 function Match:positionChanged()
     self.board:sanitizeCastling()
     self:refresh()
+    if not self.result then self:notePosition() end
     self:checkResult()
 end
 
@@ -122,7 +146,7 @@ function Match:checkResult()
         end
     elseif b:insufficientMaterial() then
         self.result = { winner = 0, reason = "INSUFFICIENT MATERIAL" }
-    elseif b.half >= 100 then
+    elseif b.half >= Config.chess.fiftyMove then
         self.result = { winner = 0, reason = "FIFTY MOVES" }
     elseif (self.reps[b:key()] or 0) >= 3 then
         self.result = { winner = 0, reason = "REPETITION" }
@@ -135,36 +159,43 @@ function Match:resign(side)
 end
 
 function Match:tick(dt)
-    if not self.timed or self.result then return end
+    if not self.timed or self.result then return false end
     local side = self.board.side
     self.clock[side] = self.clock[side] - dt
     if self.clock[side] <= 0 then
         self.clock[side] = 0
 
-        if not self.players[side].remote then self:flag(side) end
+        if not self.players[side].remote then
+            self:flag(side)
+            return true
+        end
     end
+    return false
 end
 
 function Match:flag(side)
     if self.result then return end
     self.clock[side] = 0
 
-    local b = self.board
-    local canMate = false
-    for s = 1, 64 do
-        local pc = b.p[s]
-        if pc ~= 0 and (pc > 0) == (side < 0) and abs(pc) ~= Board.K then canMate = true; break end
+    local winner = -side
+    local canMate = not self.board:insufficientMaterial()
+    if canMate then
+        canMate = false
+        local p = self.board.p
+        for s = 1, 64 do
+            local pc = p[s]
+            if pc * winner > 0 and math.abs(pc) ~= Board.K then canMate = true; break end
+        end
     end
-    self.result = { winner = canMate and -side or 0, reason = "TIMEOUT" }
+    self.result = { winner = canMate and winner or 0, reason = "TIMEOUT" }
 end
 
 function Match:materialDiff(side)
-    local v = { 1, 3, 3, 5, 9, 0 }
     local d = 0
     local p = self.board.p
     for s = 1, 64 do
         local pc = p[s]
-        if pc ~= 0 then d = d + (pc > 0 and v[pc] or -v[-pc]) end
+        if pc ~= 0 then d = d + (pc > 0 and VALUE[pc] or -VALUE[-pc]) end
     end
     return d * side
 end

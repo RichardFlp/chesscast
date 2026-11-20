@@ -65,14 +65,26 @@ function T.run(log)
     check("16 easy-CPU plies are all legal", allLegal)
 
     local t0 = os.clock()
-    local _, nodes = Search.score(Board.new(), 4, 20)
+    local score, nodes = Search.score(Board.new(), 4, 20)
     local dt = os.clock() - t0
-    check("start position depth 4", true, string.format("%d nodes, %.2fs, %d knps", nodes, dt, nodes / math.max(dt, 1e-3) / 1000))
+    check("start position depth 4 visits nodes", type(score) == "number" and nodes > 0,
+        string.format("%d nodes, %.2fs, %d knps", nodes, dt, nodes / math.max(dt, 1e-3) / 1000))
 
     local job = Search.start(Board.new(), SHARP)
     local steps = 0
     while not job:step(0.004) do steps = steps + 1; if steps > 100000 then break end end
     check("coroutine search completes", job.move ~= nil, string.format("%d yields, depth %d", steps, job.depth or 0))
+
+    check("unknown level falls back to medium", Search.level(999) == Search.LEVELS[2])
+    local custom = { depth = 1 }
+    check("level tables pass through", Search.level(custom) == custom)
+    local finished = Search.start(Board.fromFEN("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1"), SHARP)
+    local done = false
+    for _ = 1, 1000 do
+        done = finished:step(0.004)
+        if done then break end
+    end
+    check("finished position returns no move", done and finished.move == nil)
     return ok
 end
 

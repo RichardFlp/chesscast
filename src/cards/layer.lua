@@ -1,3 +1,4 @@
+local Config = require("src.config")
 local A = require("src.assets.assets")
 local Pal = require("src.utils.palette")
 local Text = require("src.ui.text")
@@ -19,20 +20,34 @@ local Layer = {}
 Layer.__index = Layer
 
 local lg = love.graphics
-local floor, min, max, abs, sin = math.floor, math.min, math.max, math.abs, math.sin
+local floor, min, max, abs, sin, pi = math.floor, math.min, math.max, math.abs, math.sin, math.pi
 local random = love.math.random
 local now = love.timer.getTime
 
-local MAX_MANA, MAX_HAND, START_HAND = 3, 6, 3
-local CARD_W, CARD_H = 128, 192
-local CENTER_X, CENTER_Y = 960, 536
-local T_IMPACT, T_FADE, T_DONE = 0.42, 0.66, 0.92
-local CPU_BUDGET = 0.006
+local CARD = Config.ui.card
+local SIDEBAR = Config.ui.sidebar
+local MAX_MANA, MAX_HAND, START_HAND = CARD.maxMana, CARD.maxHand, CARD.startHand
+local CARD_W, CARD_H = CARD.width, CARD.height
+local CENTER_X, CENTER_Y = Screen.W / 2, CARD.centerY
+local CARD_ENTER_X = { [1] = -CARD.enterX, [-1] = Screen.W + CARD.enterX }
+local CARD_ENTER_Y_OFFSET = CARD.enterYOffset
+local T_IMPACT, T_FADE, T_DONE = CARD.timing.impact, CARD.timing.fade, CARD.timing.done
+local CPU_BUDGET = Config.ai.cpuBudget
 
 local IMPACT_COLS = { Pal.C, Pal.B, Pal.I }
-local COST_STR = { [0] = "0", "1", "2", "3" }
-local KEY_SLOT = { ["1"] = 1, ["2"] = 2, ["3"] = 3, ["4"] = 4, ["5"] = 5, ["6"] = 6,
-    kp1 = 1, kp2 = 2, kp3 = 3, kp4 = 4, kp5 = 5, kp6 = 6 }
+local ROLE_COLS = { Pal.R, Pal.RL, Pal.RD }
+
+local function copyCounts(counts)
+    local out = {}
+    for k, v in pairs(counts) do out[k] = v end
+    return out
+end
+local COST_STR, KEY_SLOT = {}, {}
+for i = 0, MAX_MANA do COST_STR[i] = tostring(i) end
+for i = 1, MAX_HAND do
+    KEY_SLOT[tostring(i)] = i
+    KEY_SLOT["kp" .. i] = i
+end
 
 local function rect(x, y, w, h) lg.rectangle("fill", x, y, w, h) end
 local function round(v) return floor(v + 0.5) end
@@ -40,22 +55,23 @@ local function round(v) return floor(v + 0.5) end
 local backImg
 local function cardBack()
     if backImg then return backImg end
-    local d = love.image.newImageData(64, 96)
+    local CW, CH = Config.assets.imageSizes.cardW, Config.assets.imageSizes.cardH
+    local d = love.image.newImageData(CW, CH)
     local N, I, B, C = Pal.N, Pal.I, Pal.B, Pal.C
     d:mapPixel(function(x, y)
         local c = N
-        local ex = min(x, 63 - x)
-        local ey = min(y, 95 - y)
+        local ex = min(x, CW - 1 - x)
+        local ey = min(y, CH - 1 - y)
         local e = min(ex, ey)
         if e == 0 then c = N
         elseif e <= 2 then c = I
         elseif e == 4 then c = B
         else
 
-            local u, v = (x - 32) % 8, (y - 48) % 8
+            local u, v = (x - CW / 2) % 8, (y - CH / 2) % 8
             if abs(u - 4) + abs(v - 4) == 3 then c = I end
 
-            local m = abs(x - 31.5) + abs(y - 47.5) * 0.8
+            local m = abs(x - (CW / 2 - 0.5)) + abs(y - (CH / 2 - 0.5)) * 0.8
             if m < 15 then c = N end
             if m >= 11 and m < 13 then c = B end
             if m < 6 then c = C end
@@ -100,14 +116,17 @@ function Layer.new(game)
         L.rng = function(n) return gen:random(n) end
     end
     for _, side in ipairs({ 1, -1 }) do
-        for i, def in ipairs(Defs.list) do L.deck[side][i] = def end
-        U.shuffle(L.deck[side], L.rng)
+        local deck = L.deck[side]
+        for _, def in ipairs(Defs.deck) do deck[#deck + 1] = def end
+        U.shuffle(deck, L.rng)
     end
     cardBack()
 
-    L.castBtn = Button.new { x = 1000, y = 972, w = 160, h = 56, label = "CAST", textScale = 2,
+    local cast = CARD.cast
+    L.castBtn = Button.new { x = CENTER_X + cast.dx, y = cast.y, w = cast.w, h = cast.h, label = "CAST", textScale = 2,
         style = "primary", hoverShift = 0, onClick = function() L:confirm() end }
-    L.cancelBtn = Button.new { x = 1176, y = 972, w = 160, h = 56, label = "CANCEL", textScale = 2,
+    L.cancelBtn = Button.new { x = CENTER_X + cast.dx + cast.w + cast.gap, y = cast.y,
+        w = cast.w, h = cast.h, label = "CANCEL", textScale = 2,
         hoverShift = 0, backSound = true, onClick = function() L:cancel(true) end }
 
     L.view.drawMarks = function(view) L:drawMarks(view) end
@@ -117,6 +136,14 @@ function Layer.new(game)
         L:drawCards(-1, 1)
     end
     L:onTurnStart(L.match.board.side)
+    local roll = L.rng or random
+    if #Defs.roles > 0 then
+        for _, side in ipairs({ 1, -1 }) do
+            if roll(Config.cards.roleOdds) == 1 then
+                L:addCard(side, Defs.roles[roll(#Defs.roles)])
+            end
+        end
+    end
     return L
 end
 
@@ -127,6 +154,17 @@ end
 
 function Layer:mana(side) return self.manaOf[side] end
 function Layer:busy() return self.casting ~= nil end
+function Layer:curseActive()
+    if self.match.result then return false end
+    local c = self.casting
+    if c and c.def.role then return true end
+    local b = self.match.board
+    local ply = b.ply
+    for _, e in pairs(b.st) do
+        if e.pawned and e.pawned > ply then return true end
+    end
+    return false
+end
 function Layer:blocksBoard() return self.sel ~= nil or self.casting ~= nil end
 function Layer:dirty() self.ver = self.ver + 1 end
 
@@ -167,11 +205,11 @@ function Layer:addCard(side, def)
     if not def or #hand >= MAX_HAND then return false end
     local sb = self:sidebar(side)
     local _, sy = self:slotCenter(side, #hand + 1)
-    local cv = newCard(def, side, sb.right and 2120 or -200, sy - 60)
+    local cv = newCard(def, side, CARD_ENTER_X[side], sy + CARD_ENTER_Y_OFFSET)
     cv.rot:snap(sb.right and 0.5 or -0.5)
     local pending = 0
     for _, o in ipairs(hand) do if o.delay > 0 then pending = pending + 1 end end
-    cv.delay = 0.05 + pending * 0.14
+    cv.delay = CARD.enterDelay + pending * CARD.enterStagger
     hand[#hand + 1] = cv
     self:reslot(side)
     self:dirty()
@@ -207,7 +245,7 @@ end
 
 function Layer:snapshotFor(side)
     local ply = self.match.board.ply
-    for p = ply - 1, max(0, ply - 6), -1 do
+    for p = ply - 1, max(0, ply - CARD.snapshotDepth), -1 do
         local e = self.snaps[p]
         if e and e.board.side == side then return e end
     end
@@ -219,18 +257,18 @@ function Layer:ctxFor(side)
     local e = self:snapshotFor(side)
     c.snapshot = e and e.board or nil
     c.hist = e and e.hist or nil
+    c.reps = e and e.reps or nil
     return c
 end
 
 function Layer:onTurnStart(side)
     local b = self.match.board
     self.turnNo = self.turnNo + 1
-    self.snaps[b.ply] = { board = b:clone(), hist = #self.match.history }
-    self.snaps[b.ply - 8] = nil
+    self.snaps[b.ply] = { board = b:clone(), hist = #self.match.history, reps = copyCounts(self.match.reps) }
+    self.snaps[b.ply - CARD.snapshotKeep] = nil
     if self.sel then self:cancel(true) end
     self:dirty()
     if self.bonusTurn[side] then
-
         self.bonusTurn[side] = nil
         return
     end
@@ -369,6 +407,12 @@ function Layer:cancel(sound)
     return true
 end
 
+function Layer:discardCard(side, def)
+    if def.role then return end
+    local dis = self.discard[side]
+    dis[#dis + 1] = def
+end
+
 function Layer:beginCast(side, cv, a, c)
     local def = cv.def
     local b = self.match.board
@@ -376,21 +420,21 @@ function Layer:beginCast(side, cv, a, c)
 
     self.casting = {
         card = cv, side = side, def = def, a = a, c = c, t = 0, hit = false,
-        ctx = { snapshot = ctx.snapshot, hist = ctx.hist }, ply = b.ply,
+        ctx = { snapshot = ctx.snapshot, hist = ctx.hist, reps = ctx.reps }, ply = b.ply,
     }
     self.manaOf[side] = self.manaOf[side] - def.cost
     self.castThisTurn[side] = true
     if def.slug ~= "temporal_echo" then self.lastSpell[side] = def end
-    local dis = self.discard[side]
-    dis[#dis + 1] = def
+    -- A played card is consumed even if the spell later fizzles.
+    self:discardCard(side, def)
     self:removeCard(cv)
     self.sel = nil
     self.view:setPick(nil)
     cv.x.target, cv.y.target = CENTER_X, CENTER_Y
-    cv.lift.target, cv.rot.target, cv.scale.target, cv.face.target = 0, 0, 1.7, 1
+    cv.lift.target, cv.rot.target, cv.scale.target, cv.face.target = 0, 0, CARD.castScale, 1
     cv.rot:kick(side == 1 and 10 or -10)
     cv.scale:kick(3)
-    Audio.play("spell")
+    Audio.play("spell", def.role and 0.82 or 1)
     self:dirty()
     local g = self.game
     if g.net and not g.netApplying then g.net:cast(def.slug, a, c, self.match.clock[side]) end
@@ -399,8 +443,16 @@ end
 function Layer:impact()
     local c = self.casting
     local fx, view, def = self.game.fx, self.view, c.def
-    local cols = IMPACT_COLS
-    fx:burst(CENTER_X, CENTER_Y, 44, 560, cols, 0.9, 6, 260)
+    if def.role then
+        fx:burst(CENTER_X, CENTER_Y, 56, 620, ROLE_COLS, 0.9, 6, 260)
+        BG.pulse(CENTER_X, CENTER_Y, 1.2)
+        view:ring(CENTER_X, CENTER_Y, 40, 320, 0.55, Pal.R)
+        view:ring(CENTER_X, CENTER_Y, 20, 220, 0.42, Pal.RL)
+        Screen.shake(6, 0.22)
+        Audio.play("impact", 0.88, 0.72)
+        return
+    end
+    fx:burst(CENTER_X, CENTER_Y, 44, 560, IMPACT_COLS, 0.9, 6, 260)
     BG.pulse(CENTER_X, CENTER_Y, 0.6 + def.cost * 0.3)
     view:ring(CENTER_X, CENTER_Y, 40, 300, 0.5, Pal.C)
     view:ring(CENTER_X, CENTER_Y, 20, 200, 0.4, Pal.B)
@@ -412,7 +464,7 @@ function Layer:impact()
     for _, s in ipairs({ c.a, c.c }) do
         if s then
             local x, y = view:squareCenter(s)
-            fx:burst(x, y, 24, 300, cols, 0.7, 5, 160)
+            fx:burst(x, y, 24, 300, IMPACT_COLS, 0.7, 5, 160)
             view:ring(x, y, 10, 80, 0.4, Pal.C)
         end
     end
@@ -434,18 +486,16 @@ function Layer:resolve()
     end
     local ok, nb = S.check(b, side, def, c.a, c.c, c.ctx)
     if not ok then
-
         g:toast("FIZZLED")
         self:dirty()
         return
     end
     Defs.restore(b, nb)
     if def.after then def.after(self, side) end
-    g:toast(def.name)
+    if not def.role then g:toast(def.name) end
     g:log(who .. ": " .. def.name, def)
     if def.slug == "time_rewind" and c.ctx.hist then
-        local h = m.history
-        for i = #h, c.ctx.hist + 1, -1 do h[i] = nil end
+        m:rewind(c.ctx.hist, c.ctx.reps)
         m.lastMove = nil
         g:markRewound(c.ctx.hist)
     end
@@ -478,17 +528,18 @@ function Layer:cpuDecide(side)
     if self.ward[-side] > b.ply then return nil end
     local depth, qs, noise = L.spellDepth or 1, L.qs, L.spellNoise or 0
     local ctx = self:ctxFor(side)
-    ctx = { snapshot = ctx.snapshot, hist = ctx.hist }
+    ctx = { snapshot = ctx.snapshot, hist = ctx.hist, reps = ctx.reps }
     local t0 = now()
     local base, _, stop = Search.score(b:clone(), depth, 0.6, true, qs)
     if stop then return nil end
     local best, bestGain, bestA, bestC = nil, -math.huge, nil, nil
     local evals = 0
+    local spell = CARD.cpuSpell
     local hand = {}
     for i, cv in ipairs(self.hand[side]) do hand[i] = cv end
 
     local function try(cv, a, c)
-        if evals >= 60 or now() - t0 > 2.0 then return end
+        if evals >= spell.maxEvals or now() - t0 > spell.timeBudget then return end
         local def = cv.def
         local ok, nb = S.check(b, side, def, a, c, ctx)
         if not ok then return end
@@ -519,7 +570,7 @@ function Layer:cpuDecide(side)
             end
         end
     end
-    if best and bestGain > 40 + 25 * best.def.cost then return best, bestA, bestC end
+    if best and bestGain > spell.thresholdBase + spell.thresholdCost * best.def.cost then return best, bestA, bestC end
     return nil
 end
 
@@ -621,8 +672,8 @@ function Layer:update(dt, mx, my)
 
     local c = self.casting
     if c then
-        local cv = c.card
         c.t = c.t + dt
+        local cv = c.card
         cv.x:update(dt); cv.y:update(dt); cv.rot:update(dt)
         cv.scale:update(dt); cv.lift:update(dt); cv.face:update(dt)
         cv.glow = 1
@@ -634,7 +685,7 @@ function Layer:update(dt, mx, my)
         end
         if c.t >= T_FADE then
             cv.alpha = max(0, 1 - (c.t - T_FADE) / (T_DONE - T_FADE))
-            cv.scale.target = 2.1
+            cv.scale.target = CARD.fadeScale
         end
         if c.t >= T_DONE then
             self.casting = nil
@@ -707,29 +758,39 @@ function Layer:drawCard(cv)
 
     local drop = 10 - cv.lift.x * 0.3
     Pal.set(Pal.N, 0.55 * a)
-    rect(-64 + drop * 0.6, -96 + drop, CARD_W, CARD_H)
+    local hw, hh = CARD_W / 2, CARD_H / 2
+    rect(-hw + drop * 0.6, -hh + drop, CARD_W, CARD_H)
+    if cv.def.role and front and not self.casting then
+        local pulse = 0.5 + 0.5 * sin(self.t * 3 + cv.side * 1.7)
+        Pal.set(Pal.R, (0.04 + 0.035 * pulse) * a)
+        rect(-hw - 5, -hh - 5, CARD_W + 10, CARD_H + 10)
+    end
     if cv.glow > 0.02 then
         local p = 0.7 + 0.3 * sin(self.t * 7)
-        Pal.set(Pal.C, cv.glow * p * a)
-        rect(-72, -104, CARD_W + 16, CARD_H + 16)
-        Pal.set(Pal.B, cv.glow * a)
-        rect(-68, -100, CARD_W + 8, CARD_H + 8)
+        local accent = cv.def.role and Pal.R or Pal.C
+        local accent2 = cv.def.role and Pal.RL or Pal.B
+        Pal.set(accent, cv.glow * p * a)
+        rect(-hw - 8, -hh - 8, CARD_W + 16, CARD_H + 16)
+        Pal.set(accent2, cv.glow * a)
+        rect(-hw - 4, -hh - 4, CARD_W + 8, CARD_H + 8)
     end
     lg.setColor(1, 1, 1, a)
     if front then
-        lg.draw(A.card[cv.def.slug], -64, -96, 0, 2, 2)
+        lg.draw(A.card[cv.def.slug], -hw, -hh, 0, 2, 2)
         if a >= 1 then
-            Frame.diamond(-42, -74, 18, Pal.N)
-            Frame.diamond(-42, -74, 14, Pal.B)
-            Text.print(COST_STR[cv.def.cost], -41, -81, 2, Pal.C, "center", Pal.N)
+            local role = cv.def.role
+            Frame.diamond(-hw + 22, -hh + 22, 18, role and Pal.RD or Pal.N)
+            Frame.diamond(-hw + 22, -hh + 22, 14, role and Pal.R or Pal.B)
+            Text.print(COST_STR[cv.def.cost], -hw + 23, -hh + 15, 2,
+                role and Pal.RL or Pal.C, "center", role and Pal.RD or Pal.N)
         end
 
         if not cv.ok and not self.casting and self.match.board.side == cv.side then
             Pal.set(Pal.N, 0.5 * a)
-            rect(-64, -96, CARD_W, CARD_H)
+            rect(-hw, -hh, CARD_W, CARD_H)
         end
     else
-        lg.draw(backImg, -64, -96, 0, 2, 2)
+        lg.draw(backImg, -hw, -hh, 0, 2, 2)
     end
     lg.pop()
 end
@@ -739,8 +800,9 @@ function Layer:drawHand(side)
     local top = nil
     for i = 1, #hand do
         local cv = hand[i]
-        if cv == self.hover or (self.sel and self.sel.card == cv) then top = top or cv
-            if top ~= cv then self:drawCard(cv) end
+        local isTop = cv == self.hover or (self.sel and self.sel.card == cv)
+        if isTop and not top then
+            top = cv
         else
             self:drawCard(cv)
         end
@@ -748,7 +810,7 @@ function Layer:drawHand(side)
     if top then self:drawCard(top) end
 end
 
-local BADGE = 24
+local BADGE = CARD.badge
 local function badge(x, y, letter, col)
     Pal.set(Pal.N)
     rect(x, y, BADGE, BADGE)
@@ -761,6 +823,7 @@ function Layer:drawStatus()
     local b = self.match.board
     local view = self.view
     local sprites = view.sprites
+    local cell = Config.ui.board.cell
     local ply = b.ply
     for s = 1, 64 do
         local id = b.id[s]
@@ -770,33 +833,42 @@ function Layer:drawStatus()
             local prot = b:isProtected(s)
             if sp and sp.state == "board" and (e or prot) then
                 local x, y = round(sp.x), round(sp.y)
-                local bx = x + 4
+                local bx, by = x + 4, y + 4
+                local function addBadge(letter, col)
+                    badge(bx, by, letter, col)
+                    bx = bx + BADGE + CARD.badgeGap
+                    if bx + BADGE > x + cell - 2 then bx, by = x + 4, by + BADGE + CARD.badgeGap end
+                end
+                if e and e.pawned and e.pawned > ply then
+                    Pal.set(Pal.R, 0.10 + 0.04 * sin(self.t * 4 + s))
+                    rect(x + 4, y + 4, cell - 8, cell - 8)
+                    addBadge("P", Pal.R)
+                end
                 if e and e.frozen and e.frozen > ply then
                     Pal.set(Pal.C, 0.28 + 0.06 * sin(self.t * 3 + s))
-                    rect(x + 4, y + 4, 88, 88)
-                    badge(bx, y + 4, "F", Pal.C); bx = bx + BADGE + 2
+                    rect(x + 4, y + 4, cell - 8, cell - 8)
+                    addBadge("F", Pal.C)
                 end
-                if prot then badge(bx, y + 4, "S", Pal.C); bx = bx + BADGE + 2 end
-                if e and e.berserk and e.berserk > ply then badge(bx, y + 4, "B", Pal.B) end
+                if prot then addBadge("S", Pal.C) end
+                if e and e.berserk and e.berserk > ply then addBadge("B", Pal.B) end
             end
         end
     end
     for _, side in ipairs({ 1, -1 }) do
         local sb = self:sidebar(side)
         local tg = self.tags[side]
-        local x = sb.right and (sb.x + 112) or (sb.x + 392)
-        if tg[1] ~= "" then Text.print(tg[1], x, 860, 2, Pal.C, "right") end
-        if tg[2] ~= "" then Text.print(tg[2], x, 880, 2, Pal.B, "right") end
+        local x = sb.right and (sb.x + SIDEBAR.tagRightX) or (sb.x + SIDEBAR.tagLeftX)
+        if tg[1] ~= "" then Text.print(tg[1], x, SIDEBAR.tagY1, 2, Pal.C, "right") end
+        if tg[2] ~= "" then Text.print(tg[2], x, SIDEBAR.tagY2, 2, Pal.B, "right") end
         if self.castThisTurn[side] and b.side == side and not self.match.result then
-
-            Frame.diamond(sb.right and (sb.x + 392) or (sb.x + 16), 876, 6, Pal.I)
+            Frame.diamond(sb.right and (sb.x + SIDEBAR.tagLeftX) or (sb.x + 16), SIDEBAR.turnDotY, 6, Pal.I)
         end
     end
 end
 
 function Layer:drawMarks(view)
     local b = self.match.board
-    local S = 96
+    local S = Config.ui.board.cell
     for _, z in ipairs(b.zones) do
         if z.untilPly > b.ply then
             local pulse = 0.22 + 0.06 * sin(self.t * 3)
@@ -837,22 +909,26 @@ function Layer:drawTooltip(cv)
     local sb = self:sidebar(cv.side)
     local reason = (not cv.ok and self.match.board.side == cv.side) and cv.reason or nil
     local w, h = CardTip.size(def, reason)
-    local x = sb.right and (sb.x - 16 - w) or (sb.x + Sidebar.W + 16)
-    local y = U.clamp(round(cv.y.x + cv.lift.x - h / 2), 16, 1064 - h)
+    local edge = Config.ui.cardtip.edge
+    local x = sb.right and (sb.x - edge - w) or (sb.x + Sidebar.W + edge)
+    local y = U.clamp(round(cv.y.x + cv.lift.x - h / 2), edge, Screen.H - edge - h)
     CardTip.draw(def, x, y, reason)
 end
 
 function Layer:drawBanner()
     local sel = self.sel
     local def = sel.card.def
-    local x, y, w, h = 576, 948, 768, 104
+    local banner = Config.ui.cardtip.banner
+    local x, y, w, h = banner.x, banner.y, banner.w, banner.h
     Pal.set(Pal.N, 0.85)
     rect(x + 8, y + 8, w, h)
     lg.setColor(1, 1, 1, 1)
     A.ui.dialogue:draw(x, y, w, h, 2)
-    Text.print(def.name, x + 28, y + 24, 3, Pal.C, "left", Pal.N)
+    local accent = def.role and Pal.RL or Pal.C
+    local sub = def.role and Pal.R or Pal.B
+    Text.print(def.name, x + 28, y + 24, 3, accent, "left", def.role and Pal.RD or Pal.N)
     local prompt = sel.step == 0 and "CAST THIS SPELL?" or (sel.step == 1 and def.prompt1 or def.prompt2)
-    Text.print(prompt or "", x + 28, y + 64, 2, Pal.B, "left")
+    Text.print(prompt or "", x + 28, y + 64, 2, sub, "left")
     if sel.step == 0 then self.castBtn:draw() end
     self.cancelBtn:draw()
 end

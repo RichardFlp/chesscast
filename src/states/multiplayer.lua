@@ -1,3 +1,5 @@
+local Config = require("src.config")
+local Screen = require("src.utils.screen")
 local M = require("src.states.manager")
 local Button = require("src.ui.button")
 local W = require("src.ui.widgets")
@@ -10,19 +12,21 @@ local A = require("src.assets.assets")
 local App = require("src.app")
 
 local MP = {}
+local UI = Config.ui.multiplayer
 
 function MP:enter()
     self.t = 0
+    local cx, w, y, gap = Screen.W / 2, UI.width, UI.firstY, UI.gap
     self.items = {
-        Button.new { x = 960 - 300, y = 410, w = 600, h = 84, label = "MATCHMAKING", style = "primary",
-            tag = "PLAY A RANDOM OPPONENT", onClick = function() M.switch("lobby", { role = "match" }) end },
-        Button.new { x = 960 - 300, y = 510, w = 600, h = 84, label = "HOST ONLINE", style = "primary",
+        Button.new { x = cx - w / 2, y = y, w = w, h = UI.height, label = "MATCHMAKING", style = "primary",
+            tag = "CASUAL OR RANKED", onClick = function() M.switch("matchmaking") end },
+        Button.new { x = cx - w / 2, y = y + gap, w = w, h = UI.height, label = "HOST ONLINE", style = "primary",
             tag = "CREATE A ROOM CODE", onClick = function() M.switch("setup", { mode = "online" }) end },
-        Button.new { x = 960 - 300, y = 610, w = 600, h = 84, label = "JOIN ONLINE", style = "primary",
+        Button.new { x = cx - w / 2, y = y + gap * 2, w = w, h = UI.height, label = "JOIN ONLINE", style = "primary",
             tag = "ENTER A ROOM CODE", onClick = function() M.switch("lobby", { role = "guest" }) end },
-        Button.new { x = 960 - 300, y = 710, w = 600, h = 84, label = "LOCAL HOT-SEAT",
+        Button.new { x = cx - w / 2, y = y + gap * 3, w = w, h = UI.height, label = "LOCAL HOT-SEAT",
             tag = "2 PLAYERS, 1 SCREEN", onClick = function() M.switch("setup", { mode = "local" }) end },
-        Button.new { x = 960 - 200, y = 860, w = 400, h = 76, label = "BACK", backSound = true,
+        Button.new { x = cx - 200, y = y + gap * 4 + UI.backGap, w = 400, h = 76, label = "BACK", backSound = true,
             onClick = function() M.switch("menu") end },
     }
     self.focus = W.Focus.new(self.items)
@@ -35,14 +39,16 @@ function MP:update(dt, mx, my)
 end
 
 function MP:draw()
-    BG.draw(0.35)
-    Frame.panel(340, 150, 1240, 830, "MULTIPLAYER")
+    BG.draw(Config.ui.background.menuDim)
+    local f = Config.ui.frame
+    Frame.panel(f.x, f.y, f.w, f.h, "MULTIPLAYER")
 
     local bob = math.floor(math.sin(self.t * 2) * 2) * 2
+    local cx = Screen.W / 2
     love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.draw(A.piece[1][6], 700, 200 + bob, 0, 6, 6)
-    love.graphics.draw(A.piece[-1][6], 1028, 200 - bob, 0, 6, 6)
-    Text.print("VS", 960, 280, 6, Pal.C, "center", Pal.I)
+    love.graphics.draw(A.piece[1][6], cx - 260, UI.pieceY + bob, 0, UI.pieceScale, UI.pieceScale)
+    love.graphics.draw(A.piece[-1][6], cx + 68, UI.pieceY - bob, 0, UI.pieceScale, UI.pieceScale)
+    Text.print("VS", cx, UI.vsY, 6, Pal.C, "center", Pal.I)
     for _, it in ipairs(self.items) do it:draw() end
 end
 
