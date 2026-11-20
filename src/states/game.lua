@@ -1,3 +1,5 @@
+local Config = require("src.config")
+local A = require("src.assets.assets")
 local M = require("src.states.manager")
 local App = require("src.app")
 local Audio = require("src.audio.audio")
@@ -21,18 +23,19 @@ local U = require("src.utils.util")
 local Levels = require("src.campaign.levels")
 local Online = require("src.net.online")
 local Sync = require("src.net.sync")
+local AFK = require("src.net.afk")
 
 local lg = love.graphics
 local floor, ceil, min, max = math.floor, math.ceil, math.min, math.max
 
 local Game = {}
 
-local MIN_THINK = 0.55
-local STEP_BUDGET = 0.006
-local RESULT_DELAY = 1.2
+local GAME = Config.ui.game
+local BOARD = Config.ui.board
+local MIN_THINK, STEP_BUDGET, RESULT_DELAY = GAME.minThink, GAME.stepBudget, GAME.resultDelay
 
 local DEPTH_STR = {}
-for i = 0, 32 do DEPTH_STR[i] = "DEPTH " .. i end
+for i = 0, Config.chess.maxPly do DEPTH_STR[i] = "DEPTH " .. i end
 
 local function rect(x, y, w, h) lg.rectangle("fill", x, y, w, h) end
 
@@ -54,7 +57,7 @@ function Game:enter(p)
     self.params = p
     local match = Match.new(p)
     self.match = match
-    self.difficulty = p.difficulty or 2
+    self.difficulty = p.difficulty or Config.settings.defaults.difficulty
     self.ai = Search.level(p.ai or self.difficulty)
     local cpuMode = match.mode == "cpu"
     self.online = match.mode == "online"
@@ -63,6 +66,7 @@ function Game:enter(p)
 
     local topName = match.players[-bottom].name
     local botName = match.players[bottom].name
+    local ratings = p.ratings
     self.view = BV.new(match, {
         bottom = bottom,
         topLabel = "TAKEN FROM " .. topName,
@@ -72,17 +76,20 @@ function Game:enter(p)
 
     local level = self.ai
     self.left = Sidebar.new {
-        x = 36, side = bottom, match = match, name = botName,
+        x = Config.ui.sidebar.leftX, side = bottom, match = match, name = botName,
         sub = bottom == 1 and "WHITE PIECES" or "BLACK PIECES", showHistory = true,
+        rating = ratings and ratings[bottom],
     }
     self.right = Sidebar.new {
-        x = 1476, side = -bottom, match = match, name = topName, right = true,
+        x = Config.ui.sidebar.rightX, side = -bottom, match = match, name = topName, right = true,
         sub = cpuMode and (level.name .. " CPU") or (bottom == 1 and "BLACK PIECES" or "WHITE PIECES"),
+        rating = ratings and ratings[-bottom],
     }
 
     self.net = nil
     self.netApplying = false
     self.timeoutSent = false
+    self.afkT = 0
     self.rematchMe, self.rematchThem, self.rematchText, self.rematchBtn = false, false, nil, nil
     if self.online then
         self.net = Sync.new(self, Online.current, p.role, p.log)
@@ -97,7 +104,7 @@ function Game:enter(p)
     self.overlayShown = false
     self.overlayHidden = false
     self.toasts = {}
-    self.fx = Particles.new(500)
+    self.fx = Particles.new(GAME.particles)
     self.t = 0
     self.lastTick = -1
     self.spellLog = {}
@@ -108,8 +115,9 @@ function Game:enter(p)
     self.history = HistoryView.new(self)
     self.cursor = nil
 
-    self.pauseBtn = Button.new { x = 1384, y = 28, w = 80, h = 64, label = "II", textScale = 3,
-        hoverShift = 0, onClick = function() self:togglePause() end }
+    local pauseBtn = GAME.pauseButton
+    self.pauseBtn = Button.new { x = pauseBtn.x, y = pauseBtn.y, w = pauseBtn.w, h = pauseBtn.h,
+        label = "II", textScale = 3, hoverShift = 0, onClick = function() self:togglePause() end }
     self:buildPause()
     self.resultButtons = nil
 
@@ -127,12 +135,14 @@ function Game:enter(p)
 end
 
 function Game:leave()
+    Screen.setCurse(false)
     setCursor("arrow")
     self.cursor = nil
 end
 
 function Game:buildPause()
-    local x, w, h, gap = 760, 400, 72, 88
+    local layout = GAME.pauseMenu
+    local x, w, h, gap = layout.x, layout.w, layout.h, layout.gap
     local labels, actions
     local resign = function()
         self.paused = false
@@ -147,7 +157,8 @@ function Game:buildPause()
             resign,
         }
     else
-        labels = { "RESUME", "RESTART", "SETTINGS", "RESIGN", self.params and self.params.campaign and "ROADMAP" or "MAIN MENU" }
+        labels = { "RESUME", "RESTART", "SETTINGS", "RESIGN",
+            self.params and self.params.campaign and "ROADMAP" or "MAIN MENU" }
         actions = {
             function() self:togglePause() end,
             function() M.switch("game", self.params) end,
@@ -159,7 +170,7 @@ function Game:buildPause()
             function() M.switch(self.params and self.params.campaign and "campaign" or "menu") end,
         }
     end
-    local y0 = 316 + (5 - #labels) * gap / 2
+    local y0 = layout.top + (layout.maxButtons - #labels) * gap / 2
     self.pauseItems = {}
     for i, l in ipairs(labels) do
         self.pauseItems[i] = Button.new { x = x, y = y0 + (i - 1) * gap, w = w, h = h, label = l,
@@ -169,45 +180,51 @@ function Game:buildPause()
 end
 
 function Game:quitToMenu()
-    if self.net then Online.close(); self.net.session = nil end
     local campaign = self.params and self.params.campaign
-    M.switch(self.online and "multiplayer" or (campaign and "campaign" or "menu"))
+    if M.switch(self.online and "multiplayer" or (campaign and "campaign" or "menu")) then
+        if self.net then
+            Online.close()
+            self.net.session = nil
+        end
+    end
 end
 
 function Game:buildResult()
-    local x, w, h = 760, 400, 68
+    local layout = GAME.resultMenu
+    local x, w, h = layout.x, layout.w, layout.h
+    local y1, y2, y3 = layout.firstY, layout.firstY + layout.step, layout.firstY + layout.step * 2
     local list = {}
-    self.rematchBtn = Button.new { x = x, y = 566, w = w, h = h, label = "REMATCH", style = "primary",
+    self.rematchBtn = Button.new { x = x, y = y1, w = w, h = h, label = "REMATCH", style = "primary",
         disabled = self.online and (self.rematchMe or not (self.net and self.net.session)),
         onClick = function()
             if self.online then self:requestRematch() else M.switch("game", self.params) end
         end }
     list[1] = self.rematchBtn
-    list[2] = Button.new { x = x, y = 646, w = w, h = h, label = "VIEW BOARD",
+    list[2] = Button.new { x = x, y = y2, w = w, h = h, label = "VIEW BOARD",
         onClick = function() self.overlayHidden = true end }
-    list[3] = Button.new { x = x, y = 726, w = w, h = h, label = "MAIN MENU", backSound = true,
+    list[3] = Button.new { x = x, y = y3, w = w, h = h, label = "MAIN MENU", backSound = true,
         onClick = function() self:quitToMenu() end }
     local campaign = self.params and self.params.campaign
     if campaign then
         local nextLevel = Levels.flat[campaign + 1]
         if self.resultGood and nextLevel then
-            list[1] = Button.new { x = x, y = 566, w = w, h = h, label = "CONTINUE", style = "primary",
+            list[1] = Button.new { x = x, y = y1, w = w, h = h, label = "CONTINUE", style = "primary",
                 onClick = function() M.switch("campaign", { won = campaign }) end }
         elseif not self.resultGood then
             list[1].label = "RETRY"
         else
-            list[1] = Button.new { x = x, y = 566, w = w, h = h, label = "FINISH", style = "primary",
+            list[1] = Button.new { x = x, y = y1, w = w, h = h, label = "FINISH", style = "primary",
                 onClick = function() M.switch("campaign", { won = campaign }) end }
         end
         list[3].label = "ROADMAP"
     end
+    if self.match.result and self.match.result.reason == "AFK" then self.rematchBtn.disabled = true end
     self.resultButtons = list
     self.resultFocus = W.Focus.new(self.resultButtons)
 end
 
 function Game:togglePause()
     if self.match.result then
-
         if self.overlayShown then self.overlayHidden = not self.overlayHidden end
         return
     end
@@ -215,18 +232,19 @@ function Game:togglePause()
     Audio.play(self.paused and "ui_click" or "ui_back")
 end
 
-function Game:toast(text, big)
-    local s = Spring.new(0.2, 420, 14)
+function Game:toast(text, big, role)
+    local toast = GAME.toast
+    local s = Spring.new(toast.spring[1], toast.spring[2], toast.spring[3])
     s.target = 1
     local list = self.toasts
-    if #list >= 3 then table.remove(list, 1) end
-    list[#list + 1] = { text = text, t = 0, life = big and 1.6 or 1.3, s = s, big = big }
+    if #list >= toast.max then table.remove(list, 1) end
+    list[#list + 1] = { text = text, t = 0, life = big and toast.bigLife or toast.life, s = s, big = big, role = role }
 end
 
 function Game:log(text, def)
     local l = self.spellLog
     l[#l + 1] = { text = text, def = def }
-    if #l > 12 then table.remove(l, 1) end
+    if #l > GAME.spellLogMax then table.remove(l, 1) end
 end
 
 local function push(self, e)
@@ -240,7 +258,6 @@ function Game:recordMove(side, san, ply)
 end
 
 function Game:recordSpell(side, def, countered)
-
     local c = self.spells and self.spells.casting
     local ply = self.match.board.ply
     if (countered or def.endsTurn) and c then ply = c.ply end
@@ -300,6 +317,7 @@ end
 function Game:turnStarted()
     self.job = nil
     self.thinkT = 0
+    self.afkT = 0
     if self.spells and not self.match.result then self.spells:onTurnStart(self.match.board.side) end
 end
 
@@ -307,21 +325,26 @@ function Game:positionChanged(info)
     self.match:positionChanged()
     self.view:sync(info)
     self.job = nil
+    self.afkT = 0
     if self.match.check and not self.match.result then Audio.play("check"); self:toast("CHECK", true) end
 end
 
 function Game:onResult()
     local r = self.match.result
-    local cpuMode = self.match.mode ~= "local"
-    local good = r.winner ~= 0 and (not cpuMode or r.winner == self.match.human)
+    -- CPU and online games report the result from the human player's seat.
+    -- Hot-seat games report the winning colour instead.
+    local relative = self.match.mode ~= "local"
+    local good = r.winner ~= 0 and (not relative or r.winner == self.match.human)
     if r.winner == 0 then Audio.play("defeat", 1.2, 0.7)
     elseif good then Audio.play("victory") else Audio.play("defeat") end
     if r.winner ~= 0 then
-        if cpuMode then
+        if relative then
             self.resultTitle = good and "VICTORY" or "DEFEAT"
         else
             self.resultTitle = r.winner == 1 and "WHITE WINS" or "BLACK WINS"
         end
+    elseif r.reason == "AFK" then
+        self.resultTitle = "MATCH ABORTED"
     elseif r.reason == "CONNECTION LOST" or r.reason == "OUT OF SYNC" then
         self.resultTitle = "DISCONNECTED"
     else
@@ -333,7 +356,8 @@ function Game:onResult()
         if self.online then reason = r.winner == self.match.human and "YOUR OPPONENT RESIGNED" or "YOU RESIGNED"
         else reason = (r.winner == 1 and "BLACK" or "WHITE") .. " RESIGNED" end
     elseif r.reason == "REPETITION" then reason = "THREEFOLD REPETITION"
-    elseif r.reason == "FIFTY MOVES" then reason = "FIFTY MOVE RULE" end
+    elseif r.reason == "FIFTY MOVES" then reason = "FIFTY MOVE RULE"
+    elseif r.reason == "AFK" then reason = "PLAYER AFK" end
     self.resultReason = reason
     self.resultGood = good
     local campaign = self.params and self.params.campaign
@@ -358,7 +382,7 @@ function Game:netEnded(reason)
         return
     end
     if reason == "OPPONENT LEFT" then
-        match.result = { winner = match.human, reason = "RESIGNED" }
+        match.result = { winner = match.human, reason = reason }
         self.rematchText = "OPPONENT LEFT"
     elseif reason == "OPPONENT DISCONNECTED" then
         match.result = { winner = match.human, reason = reason }
@@ -373,9 +397,14 @@ local function copy(t)
     return c
 end
 
+function Game:rematchAllowed()
+    local result = self.match.result
+    return result ~= nil and result.reason ~= "AFK"
+end
+
 function Game:requestRematch()
     local net = self.net
-    if self.rematchMe or not (net and net.session) then return end
+    if not self:rematchAllowed() or self.rematchMe or not (net and net.session) then return end
     self.rematchMe = true
     self.rematchBtn.disabled = true
     self.rematchText = "WAITING FOR OPPONENT"
@@ -384,30 +413,37 @@ function Game:requestRematch()
 end
 
 function Game:rematchRequested()
+    if not self:rematchAllowed() then return end
     self.rematchThem = true
     if not self.rematchMe then self.rematchText = "OPPONENT WANTS A REMATCH" end
     Audio.play("ui_click")
     self:tryRematch()
 end
 
-function Game:beginRematch(np)
+function Game:beginRematch(np, header)
+    if self.match.result and self.match.result.reason == "AFK" then return false end
+    if not M.switch("game", np) then return false end
+    if header and self.net and self.net.session then self.net.session:sendMove(header) end
     self.net.session = nil
     self.net.over = true
-    M.switch("game", np)
+    return true
 end
 
 function Game:tryRematch()
+    if not self:rematchAllowed() then return end
     if not (self.rematchMe and self.rematchThem) or self.net.role ~= "host" then return end
     local p = self.params
     local names = p.names or {}
     local side = -p.human
     local np = copy(p)
-    np.human, np.seed = side, love.math.random(1, 2 ^ 31 - 1)
+    np.human, np.seed = side, love.math.random(1, Config.net.maxSeed)
     np.names = { [side] = names[p.human], [-side] = names[-p.human] }
+    if p.ratings then
+        np.ratings = { [side] = p.ratings[p.human], [-side] = p.ratings[-p.human] }
+    end
     local header = Sync.header(np.seed, p.spells, p.clock, side, names[p.human])
     np.log = { header }
-    self.net.session:sendMove(header)
-    self:beginRematch(np)
+    self:beginRematch(np, header)
 end
 
 function Game:rematchStart(lines)
@@ -418,7 +454,31 @@ function Game:rematchStart(lines)
     np.human = -h.hostSide
     np.seed, np.spells, np.clock, np.log = h.seed, h.spells, h.clock, lines
     np.names = { [np.human] = names[p.human], [h.hostSide] = h.name }
+    if p.ratings then
+        np.ratings = { [np.human] = p.ratings[-p.human], [h.hostSide] = p.ratings[p.human] }
+    end
     self:beginRematch(np)
+end
+
+function Game:afkLimit()
+    return AFK.limit(self.match, self.online, self.started, self.net and self.net.session)
+end
+
+function Game:afkRemaining()
+    return AFK.remaining(self.afkT, self:afkLimit())
+end
+
+function Game:abortAfk()
+    if self.match.result or not (self.net and self.net.session) then return end
+    self.match.result = { winner = 0, reason = "AFK" }
+    self.net:localAction("A " .. self.match.human)
+end
+
+function Game:updateAfk(dt)
+    local limit = self:afkLimit()
+    local expired
+    self.afkT, expired = AFK.advance(self.afkT, limit, dt)
+    if expired then self:abortAfk() end
 end
 
 function Game:updateCPU(dt)
@@ -446,6 +506,7 @@ end
 function Game:update(dt, mx, my)
     self.t = self.t + dt
     self.mx, self.my = mx, my
+    if self.spells then Screen.setCurse(self.spells:curseActive()) else Screen.setCurse(false) end
     BG.update(dt)
     local match = self.match
     local view = self.view
@@ -458,17 +519,17 @@ function Game:update(dt, mx, my)
     if not frozen then
 
         if self.started and not match.result and not (tut and tut.running) then
-            match:tick(dt)
+            local timedOut = match:tick(dt)
             local side = match.board.side
 
-            if self.net and match.result and match.result.reason == "TIMEOUT" and not self.timeoutSent then
+            if self.net and timedOut and not self.timeoutSent then
                 self.timeoutSent = true
                 self.net:localAction("T " .. side)
             end
 
             if match.timed and not match.result and match:isLocal(side) then
                 local c = match.clock[side]
-                if c < 10 then
+                if c < GAME.lowClock then
                     local sec = floor(c)
                     if sec ~= self.lastTick then self.lastTick = sec; Audio.play("tick", 1.4, 0.5) end
                 end
@@ -476,6 +537,7 @@ function Game:update(dt, mx, my)
         end
         if not holding then self:updateCPU(dt) end
         if self.net then self.net:update() end
+        if self.started and not match.result then self:updateAfk(dt) end
         local side = match.board.side
         view.interactive = self.started and not match.result and match:isLocal(side) and not view:busy()
             and not self.paused and not self.historyOpen and not holding
@@ -509,8 +571,10 @@ function Game:update(dt, mx, my)
         if self.overlayShown and not self.overlayHidden then
             for _, b in ipairs(self.resultButtons) do b:update(dt, mx, my) end
         end
-        if self.resultGood and self.overlayShown and self.resultT < 4 and floor(self.resultT * 4) ~= floor((self.resultT - dt) * 4) then
-            self:confetti(12)
+        local confetti = GAME.confetti
+        if self.resultGood and self.overlayShown and self.resultT < confetti.seconds
+            and floor(self.resultT * 4) ~= floor((self.resultT - dt) * 4) then
+            self:confetti(confetti.burst)
         end
     end
 
@@ -543,8 +607,8 @@ end
 
 function Game:confetti(n)
     local cols = { Pal.C, Pal.B, Pal.I }
-    for _ = 1, n or 60 do
-        local x = 576 + love.math.random() * 768
+    for _ = 1, n or GAME.confetti.count do
+        local x = BOARD.x + love.math.random() * BOARD.cell * 8
         self.fx:add(x, -10 - love.math.random() * 60, (love.math.random() - 0.5) * 120, 80 + love.math.random() * 160,
             2.5 + love.math.random(), 4 + 2 * love.math.random(0, 2), cols[love.math.random(3)], 120, 0.6)
     end
@@ -561,20 +625,24 @@ end
 
 function Game:drawScene()
     local match = self.match
-    BG.draw(0.5)
+    BG.draw(GAME.sceneDim)
     self.left:drawBackdrop()
     self.right:drawBackdrop()
     self.view:drawTrays()
     self.view:draw()
 
-    for _, sb in ipairs({ self.left, self.right }) do
-        sb:drawPlate(self:plateStatus(sb.side))
-        sb:drawClock()
-        sb:drawSlots(match.spells)
-        if match.spells then
-            local mana = self.spells and self.spells:mana(sb.side) or 0
-            sb:drawMana(mana, 3)
-        end
+    local left, right = self.left, self.right
+    left:drawPlate(self:plateStatus(left.side))
+    left:drawClock()
+    left:drawSlots(match.spells)
+    if match.spells then
+        left:drawMana(self.spells and self.spells:mana(left.side) or 0, Config.ui.card.maxMana)
+    end
+    right:drawPlate(self:plateStatus(right.side))
+    right:drawClock()
+    right:drawSlots(match.spells)
+    if match.spells then
+        right:drawMana(self.spells and self.spells:mana(right.side) or 0, Config.ui.card.maxMana)
     end
     self.left:drawHistory()
     self:drawRightStatus()
@@ -584,9 +652,8 @@ function Game:drawScene()
     if self.spells then self.spells:drawOverlay() end
     self.fx:draw()
     self:drawToasts()
-
     local tip = self.left.tipDef or self.right.tipDef
-    if tip then CardTip.drawAtMouse(tip, self.mx, 912) end
+    if tip then CardTip.drawAtMouse(tip, self.mx, GAME.cardTipY) end
 end
 
 function Game:drawRightStatus()
@@ -615,42 +682,59 @@ function Game:drawToasts()
         local k = tt.big and 6 or 4
         local scale = max(0.05, tt.s.x)
         local fade = tt.t > tt.life - 0.25 and (tt.life - tt.t) / 0.25 or 1
-        local w = Text.width(tt.text, k) + 80
-        local h = k * 8 + 48
-        local cy = 536 - (#list - i) * (h + 12)
+        local toast = GAME.toast
+        local w = Text.width(tt.text, k) + toast.widthPad
+        local h = k * 8 + toast.heightPad
+        local cy = Config.ui.card.centerY - (#list - i) * (h + toast.gap)
         lg.push()
-        lg.translate(960, cy)
+        lg.translate(Screen.W / 2, cy)
         lg.scale(scale, scale)
-        Pal.set(Pal.N, 0.8 * fade)
-        rect(-w / 2 + 8, -h / 2 + 8, w, h)
-        lg.setColor(1, 1, 1, fade)
-        require("src.assets.assets").ui.dialogue:draw(floor(-w / 2), floor(-h / 2), w, h, 2)
-        Text.print(tt.text, 0, -k * 4 + 2, k, Pal.C, "center", Pal.N, fade)
+        if tt.role then
+            Pal.set(Pal.RD, 0.94 * fade)
+            rect(-w / 2 + 8, -h / 2 + 8, w, h)
+            Pal.set(Pal.RD, 0.98 * fade)
+            rect(-w / 2, -h / 2, w, h)
+            Pal.set(Pal.R, fade)
+            rect(-w / 2 + 4, -h / 2 + 4, w - 8, 4)
+            rect(-w / 2 + 4, h / 2 - 8, w - 8, 4)
+            rect(-w / 2 + 4, -h / 2 + 8, 4, h - 16)
+            rect(w / 2 - 8, -h / 2 + 8, 4, h - 16)
+            Text.print(tt.text, 0, -k * 4 + 2, k, Pal.RL, "center", Pal.RD, fade)
+        else
+            Pal.set(Pal.N, 0.8 * fade)
+            rect(-w / 2 + 8, -h / 2 + 8, w, h)
+            lg.setColor(1, 1, 1, fade)
+            A.ui.dialogue:draw(floor(-w / 2), floor(-h / 2), w, h, 2)
+            Text.print(tt.text, 0, -k * 4 + 2, k, Pal.C, "center", Pal.N, fade)
+        end
         lg.pop()
     end
 end
 
 function Game:drawPause()
     Pal.set(Pal.N, 0.7)
-    rect(0, 0, 1920, 1080)
-    Frame.panel(710, 230, 500, 600, "PAUSED")
+    rect(0, 0, Screen.W, Screen.H)
+    local p = GAME.pause
+    Frame.panel(p.x, p.y, p.w, p.h, "PAUSED")
     for _, b in ipairs(self.pauseItems) do b:draw() end
-    Text.print("ESC TO RESUME", 960, 776, 2, Pal.B, "center")
+    Text.print("ESC TO RESUME", Screen.W / 2, p.hintY, 2, Pal.B, "center")
 end
 
 function Game:drawResult()
-    local a = min(1, (self.resultT - RESULT_DELAY) * 3)
+    local overlay = GAME.resultOverlay
+    local a = min(1, (self.resultT - RESULT_DELAY) * overlay.fade)
     Pal.set(Pal.N, 0.65 * a)
-    rect(0, 0, 1920, 1080)
-    local slide = (1 - a) * 60
+    rect(0, 0, Screen.W, Screen.H)
+    local slide = (1 - a) * overlay.slide
     lg.push()
     lg.translate(0, slide)
-    Frame.panel(640, 330, 640, 490)
+    local r = GAME.result
+    Frame.panel(r.x, r.y, r.w, r.h)
     local col = self.resultTitle == "DEFEAT" and Pal.B or Pal.C
-    Text.print(self.resultTitle, 960, 380, 8, col, "center", Pal.N)
-    Frame.divider(700, 466, 520)
-    Text.print(self.resultReason, 960, 494, 3, Pal.B, "center")
-    if self.rematchText then Text.print(self.rematchText, 960, 534, 2, Pal.C, "center", Pal.N) end
+    Text.print(self.resultTitle, Screen.W / 2, r.titleY, 8, col, "center", Pal.N)
+    Frame.divider(r.dividerX, r.dividerY, r.dividerW)
+    Text.print(self.resultReason, Screen.W / 2, r.reasonY, 3, Pal.B, "center")
+    if self.rematchText then Text.print(self.rematchText, Screen.W / 2, r.rematchY, 2, Pal.C, "center", Pal.N) end
     lg.pop()
     for _, b in ipairs(self.resultButtons) do b:draw() end
 end
@@ -658,14 +742,25 @@ end
 function Game:drawNetWarning()
     local net = self.net
     if not (net and net.session) or self.match.result then return end
+    local afk = self:afkRemaining()
+    if afk then
+        local text = "OPPONENT AFK  " .. afk
+        local w = Text.width(text, 3) + 60
+        Pal.set(Pal.N, 0.85)
+        local warn = GAME.warning
+        rect(Screen.W / 2 - w / 2, warn.y, w, warn.h)
+        Text.print(text, Screen.W / 2, warn.textY, 3, Pal.C, "center", Pal.N)
+        return
+    end
     local quiet = net:silence()
     if quiet < Sync.WARN_AFTER then return end
     local left = max(0, ceil(Sync.DROP_AFTER - quiet))
     local text = "OPPONENT NOT RESPONDING  " .. left
     local w = Text.width(text, 3) + 60
     Pal.set(Pal.N, 0.85)
-    rect(960 - w / 2, 24, w, 56)
-    Text.print(text, 960, 40, 3, Pal.C, "center", Pal.N)
+    local warn = GAME.warning
+    rect(Screen.W / 2 - w / 2, warn.y, w, warn.h)
+    Text.print(text, Screen.W / 2, warn.textY, 3, Pal.C, "center", Pal.N)
 end
 
 function Game:draw()
@@ -696,7 +791,8 @@ function Game:mousepressed(x, y, b)
     if self.historyOpen then
         if self.history:mousepressed(x, y, b) then return end
 
-        if not U.inRect(x, y, 240, 104, 1440, 880) then self:closeHistory() end
+        local h = Config.ui.history
+        if not U.inRect(x, y, h.x, h.y, h.w, h.h) then self:closeHistory() end
         return
     end
     if self.pauseBtn:mousepressed(x, y, b) then return end
@@ -763,8 +859,7 @@ function Game:keypressed(key)
 end
 
 function Game:windowFocus(f)
-
-    if not f and not self.match.result and not self.paused and not Game.noAutoPause and not self.online then
+    if not f and not self.match.result and not self.paused and not self.online then
         self.paused = true
     end
 end

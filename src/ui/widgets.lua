@@ -1,3 +1,4 @@
+local Config = require("src.config")
 local A = require("src.assets.assets")
 local Pal = require("src.utils.palette")
 local Text = require("src.ui.text")
@@ -13,7 +14,7 @@ W.Slider = Slider
 
 function Slider.new(o)
     local s = setmetatable(o, Slider)
-    s.h = 64
+    s.h = Config.ui.widget.height
     s.knob = Spring.new(s.value, 400, 28)
     s.glow = Spring.new(0, 250, 18)
     s.dragging = false
@@ -23,7 +24,8 @@ function Slider.new(o)
 end
 
 function Slider:trackRect()
-    return self.x + self.w - 520, self.y + 16, 520 - self.valueW - 8, 32
+    local W = Config.ui.widget
+    return self.x + self.w - W.trackW, self.y + 16, W.trackW - self.valueW - 8, W.trackH
 end
 
 function Slider:update(dt, mx, my)
@@ -82,7 +84,8 @@ function Slider:draw()
     love.graphics.rectangle("fill", kx + 4, ty - 2 + 4, 28, th + 4)
     love.graphics.setColor(1, 1, 1, 1)
     A.ui.button_primary:draw(kx, ty - 6 - math.floor(g * 2) * 2, 28, th + 8, 2)
-    Text.print(string.format("%3d%%", math.floor(self.value * 100 + 0.5)), self.x + self.w, self.y + 22, 3, Pal.C, "right", Pal.N)
+    local label = string.format("%3d%%", math.floor(self.value * 100 + 0.5))
+    Text.print(label, self.x + self.w, self.y + 22, 3, Pal.C, "right", Pal.N)
 end
 
 local Selector = {}
@@ -91,14 +94,17 @@ W.Selector = Selector
 
 function Selector.new(o)
     local s = setmetatable(o, Selector)
-    s.h = 64
+    s.h = Config.ui.widget.height
     s.glow = Spring.new(0, 250, 18)
 
     s.arrowL, s.arrowR = Spring.new(0, 900, 60), Spring.new(0, 900, 60)
     return s
 end
 
-function Selector:boxRect() return self.x + self.w - 520, self.y + 4, 520, 56 end
+function Selector:boxRect()
+    local W = Config.ui.widget
+    return self.x + self.w - W.trackW, self.y + 4, W.trackW, W.boxH
+end
 
 function Selector:update(dt, mx, my)
     local over = U.inRect(mx, my, self.x, self.y, self.w, self.h)
@@ -153,13 +159,16 @@ W.Toggle = Toggle
 
 function Toggle.new(o)
     local t = setmetatable(o, Toggle)
-    t.h = 64
+    t.h = Config.ui.widget.height
     t.glow = Spring.new(0, 250, 18)
     t.pop = Spring.new(1, 600, 22)
     return t
 end
 
-function Toggle:boxRect() return self.x + self.w - 520, self.y + 4, 56, 56 end
+function Toggle:boxRect()
+    local W = Config.ui.widget
+    return self.x + self.w - W.trackW, self.y + 4, W.boxH, W.boxH
+end
 
 function Toggle:update(dt, mx, my)
     self.over = U.inRect(mx, my, self.x, self.y, self.w, self.h)
@@ -236,11 +245,11 @@ function Focus:keypressed(key)
     end
     if key == "down" or key == "s" or key == "tab" then move(1); return true end
     if key == "up" or key == "w" then
-        if self.index == 0 then self:set(n + 1 > n and n or 1) else move(-1) end
+        if self.index == 0 then self:set(n) else move(-1) end
         return true
     end
     local it = self.items[self.index]
-    if not it then return false end
+    if not it or it.disabled then return false end
     if key == "return" or key == "kpenter" or key == "space" then
         if it.activate then it:activate() elseif it.step then it:step(1) end
         return true

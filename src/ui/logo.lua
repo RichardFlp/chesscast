@@ -1,3 +1,4 @@
+local Config = require("src.config")
 local A = require("src.assets.assets")
 local Pal = require("src.utils.palette")
 local Text = require("src.ui.text")
@@ -51,9 +52,11 @@ end
 
 function Logo.draw(cx, y, t)
     local k1, k2 = 16, 8
-    drawWord("CHESS", cx, y, k1, t, 0)
+    local name = Config.app.name:upper()
+    local split = math.ceil(#name / 2)
+    drawWord(name:sub(1, split), cx, y, k1, t, 0)
     local y2 = y + 7 * k1 + 44
-    local w2 = drawWord("CAST", cx, y2, k2, t, 2.5)
+    local w2 = drawWord(name:sub(split + 1), cx, y2, k2, t, 2.5)
     local ry = y2 + 7 * k2 / 2
     rune(math.floor((cx - w2 / 2 - 64) / 2) * 2, ry, t, 0)
     rune(math.floor((cx + w2 / 2 + 56) / 2) * 2, ry, t, 1.6)

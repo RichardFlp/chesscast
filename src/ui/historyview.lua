@@ -1,3 +1,5 @@
+local Config = require("src.config")
+local Screen = require("src.utils.screen")
 local Pal = require("src.utils.palette")
 local Text = require("src.ui.text")
 local Frame = require("src.ui.frame")
@@ -11,14 +13,15 @@ HV.__index = HV
 local lg = love.graphics
 local floor, max, min = math.floor, math.max, math.min
 
-local PX, PY, PW, PH = 240, 104, 1440, 880
-local LIST_X, LIST_Y, LIST_W, LIST_H = 276, 262, 1352, 610
-local NO_X = 300
-local COL_X = { [1] = 400, [-1] = 1020 }
-local COL_W = 580
-local LINE_H = 48
-local CHIP_H = 34
-local GAP = 14
+local H = Config.ui.history
+local PX, PY, PW, PH = H.x, H.y, H.w, H.h
+local LIST_X, LIST_Y, LIST_W, LIST_H = H.listX, H.listY, H.listW, H.listH
+local NO_X = H.noX
+local COL_X = H.colX
+local COL_W = H.colW
+local LINE_H = H.lineH
+local CHIP_H = H.chipH
+local GAP = H.gap
 HV.COL_X, HV.LIST_Y, HV.LINE_H = COL_X, LIST_Y, LINE_H
 
 local function rect(x, y, w, h) lg.rectangle("fill", x, y, w, h) end
@@ -29,8 +32,10 @@ function HV.new(game)
     h.ver = -1
     h.rows = {}
     h.mx, h.my = 0, 0
-    h.back = Button.new { x = 810, y = 900, w = 300, h = 60, label = "BACK", style = "primary",
-        backSound = true, onClick = function() game:closeHistory() end }
+    local back = H.back
+    h.back = Button.new { x = Screen.W / 2 - back.w / 2, y = Screen.H - back.bottom, w = back.w, h = back.h,
+        label = "BACK", style = "primary", backSound = true,
+        onClick = function() game:closeHistory() end }
     return h
 end
 
@@ -67,7 +72,7 @@ function HV:rebuild()
         local cell = row.cells[e.side]
         cell[#cell + 1] = e
         if e.kind == "move" and not e.rewound then self.moves = self.moves + 1 end
-        if e.kind == "spell" then self.spells = self.spells + 1 end
+        if e.kind == "spell" and not e.rewound then self.spells = self.spells + 1 end
     end
     table.sort(rows, function(a, b) return a.no < b.no end)
     local y = 0
@@ -108,7 +113,7 @@ function HV:update(dt, mx, my)
                 for side, cell in pairs(row.cells) do
                     for _, it in ipairs(cell) do
                         if it.kind == "spell" then
-                            local ix, iy = COL_X[side] + it.x, ry + it.line * LINE_H + 7
+                            local ix, iy = COL_X[side] + it.x, ry + it.line * LINE_H + H.tooltipPadY
                             if U.inRect(mx, my, ix, iy, it.w, CHIP_H) then self.tip = it.def end
                         end
                     end
@@ -169,23 +174,23 @@ end
 function HV:draw()
     local g = self.game
     Pal.set(Pal.N, 0.75)
-    rect(0, 0, 1920, 1080)
+    rect(0, 0, Screen.W, Screen.H)
     Frame.panel(PX, PY, PW, PH, "MATCH HISTORY")
 
     Text.print(self.summary, PX + 36, PY + 50, 2, Pal.B, "left")
     Text.print("HOVER A SPELL TO READ IT", PX + PW - 36, PY + 50, 2, Pal.B, "right")
 
     local m = g.match
-    Text.print("#", NO_X, 220, 2, Pal.B, "left")
+    Text.print("#", NO_X, H.headY, 2, Pal.B, "left")
     for side, x in pairs(COL_X) do
-        Frame.diamond(x + 8, 228, 8, side == 1 and Pal.C or Pal.N)
-        Text.print(m.players[side].name, x + 26, 220, 2, Pal.C, "left", Pal.N)
+        Frame.diamond(x + 8, H.nameY + 8, 8, side == 1 and Pal.C or Pal.N)
+        Text.print(m.players[side].name, x + 26, H.nameY, 2, Pal.C, "left", Pal.N)
     end
     Pal.set(Pal.B)
-    rect(LIST_X, 246, LIST_W, 2)
+    rect(LIST_X, H.headSepY, LIST_W, 2)
 
     if #self.rows == 0 then
-        Text.print("NO MOVES YET", 960, LIST_Y + 60, 3, Pal.I, "center")
+        Text.print("NO MOVES YET", Screen.W / 2, LIST_Y + H.emptyY, 3, Pal.I, "center")
     else
         lg.setScissor(LIST_X, LIST_Y, LIST_W, LIST_H)
         for i, row in ipairs(self.rows) do
@@ -209,13 +214,13 @@ function HV:draw()
         lg.setScissor()
 
         if self.maxScroll > 0 then
-            local bx = LIST_X + LIST_W - 10
+            local bx = LIST_X + LIST_W - H.scrollBarX
             Pal.set(Pal.N)
-            rect(bx, LIST_Y, 8, LIST_H)
+            rect(bx, LIST_Y, H.scrollBarW, LIST_H)
             local th = max(40, LIST_H * LIST_H / self.total)
             local ty = LIST_Y + (LIST_H - th) * (self.scroll / self.maxScroll)
             Pal.set(Pal.B)
-            rect(bx, floor(ty), 8, floor(th))
+            rect(bx, floor(ty), H.scrollBarW, floor(th))
         end
     end
     Pal.set(Pal.B)

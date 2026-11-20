@@ -1,6 +1,8 @@
+local Config = require("src.config")
+local Screen = require("src.utils.screen")
 local Pal = require("src.utils.palette")
 
-local T = { a = 0, state = "idle", speed = 4, callback = nil }
+local T = { a = 0, state = "idle", speed = Config.ui.transitionSpeed, callback = nil }
 
 function T.start(callback)
     if T.state == "out" then return end
@@ -29,7 +31,7 @@ end
 function T.draw()
     if T.a <= 0 then return end
     Pal.set(Pal.N, T.a)
-    love.graphics.rectangle("fill", -16, -16, 1920 + 32, 1080 + 32)
+    love.graphics.rectangle("fill", -16, -16, Screen.W + 32, Screen.H + 32)
 end
 
 return T

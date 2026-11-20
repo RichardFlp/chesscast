@@ -1,8 +1,12 @@
+local Config = require("src.config")
+
 local WebNet = {}
 
 local floor = math.floor
-local TAG = "@@CPNET "
-local MAX_FRAME = 64 * 1024
+local TAG = Config.net.bridgeTag
+local MAX_FRAME = Config.net.maxFrame
+local PREFIX, EXT = Config.net.bridgePrefix, Config.net.bridgeExt
+local ID_PAD, ID_RANDOM = Config.net.bridgeIdPad, Config.net.bridgeRandom
 
 local function hex(s)
     return (s:gsub(".", function(c) return string.format("%02x", c:byte()) end))
@@ -32,9 +36,9 @@ local counter = 0
 function WebNet.open(url, raw)
     counter = counter + 1
 
-    local id = string.format("%d%03d%d", os.time(), floor(love.math.random() * 1000), counter)
+    local id = string.format("%d%0" .. ID_PAD .. "d%d", os.time(), floor(love.math.random() * ID_RANDOM), counter)
 
-    love.filesystem.write("net_ready.txt", "")
+    love.filesystem.write(Config.net.readyFile, "")
     local link = { id = id, seq = 0, buf = "", done = false }
     local inbox, outbox = queue(), queue()
 
@@ -46,7 +50,7 @@ function WebNet.open(url, raw)
 
     local function pump()
         while true do
-            local name = "net_" .. id .. "_" .. (link.seq + 1) .. ".txt"
+            local name = PREFIX .. id .. "_" .. (link.seq + 1) .. EXT
             if not love.filesystem.getInfo(name) then break end
             local line = love.filesystem.read(name) or ""
             love.filesystem.remove(name)
@@ -96,14 +100,14 @@ end
 function WebNet.copy(text) print(TAG .. "copy 0 " .. hex(text)) end
 
 function WebNet.takePaste()
-    if not love.filesystem.getInfo("net_paste.txt") then return nil end
-    local t = love.filesystem.read("net_paste.txt")
-    love.filesystem.remove("net_paste.txt")
+    if not love.filesystem.getInfo(Config.net.pasteFile) then return nil end
+    local t = love.filesystem.read(Config.net.pasteFile)
+    love.filesystem.remove(Config.net.pasteFile)
     return t and unhex(t) or nil
 end
 
 function WebNet.init()
-    love.filesystem.write("net_ready.txt", "")
+    love.filesystem.write(Config.net.readyFile, "")
     print(TAG .. "init 0 " .. love.filesystem.getSaveDirectory())
 end
 

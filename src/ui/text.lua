@@ -1,3 +1,4 @@
+local Config = require("src.config")
 local A = require("src.assets.assets")
 local Pal = require("src.utils.palette")
 
@@ -11,7 +12,7 @@ function Text.init()
     for k, f in pairs(A.font) do
         local top = 0
         local ok, r = pcall(love.font.newTrueTypeRasterizer,
-            "assets/fonts/PixelEmulator-xq08.ttf", A.FONT_SIZES[k], "mono", 1)
+            Config.assets.font, A.FONT_SIZES[k], "mono", 1)
         if ok then
             local _, by = r:getGlyphData("H"):getBearing()
             top = f:getBaseline() - by
@@ -23,7 +24,7 @@ end
 function Text.capTop(k) return capTop[k] or 0 end
 
 function Text.width(s, k) return Text.font(k):getWidth(s) end
-function Text.height(k) return 7 * k end
+function Text.height(k) return Config.ui.lineHeight * k end
 
 function Text.print(s, x, y, k, col, align, shadow, alpha)
     local f = Text.font(k)
@@ -45,13 +46,13 @@ end
 function Text.wrap(s, x, y, k, col, width, lineGap, align, alpha)
     local f = Text.font(k)
     local _, lines = f:getWrap(s, width)
-    local lh = 7 * k + (lineGap or 3 * k)
+    local lh = Config.ui.lineHeight * k + (lineGap or Config.ui.lineGap * k)
     for i, line in ipairs(lines) do
         local lx = x
         if align == "center" then lx = x + width / 2 end
         Text.print(line, lx, y + (i - 1) * lh, k, col, align, nil, alpha)
     end
-    return #lines, #lines * lh - (lineGap or 3 * k)
+    return #lines, #lines * lh - (lineGap or Config.ui.lineGap * k)
 end
 
 function Text.lines(s, k, width)

@@ -1,3 +1,5 @@
+local Config = require("src.config")
+local Screen = require("src.utils.screen")
 local A = require("src.assets.assets")
 local Pal = require("src.utils.palette")
 local Text = require("src.ui.text")
@@ -9,17 +11,16 @@ local Defs = require("src.cards.defs")
 local Sidebar = {}
 Sidebar.__index = Sidebar
 
-Sidebar.W = 408
-local W = 408
+Sidebar.W = Config.ui.sidebar.width
+local W = Sidebar.W
 local lg = love.graphics
 local floor, sin, min, max = math.floor, math.sin, math.min, math.max
 
-Sidebar.SLOT_W, Sidebar.SLOT_H = 136, 200
-local SLOT_X = { 60, 212 }
-local SLOT_Y = { 220, 428, 636 }
-local HIST_LINES = 5
-local BOX_Y, BOX_H = 912, 148
-local COL2, COL3 = 84, 224
+Sidebar.SLOT_W, Sidebar.SLOT_H = Config.ui.sidebar.slotW, Config.ui.sidebar.slotH
+local SLOT_X, SLOT_Y = Config.ui.sidebar.slotX, Config.ui.sidebar.slotY
+local HIST_LINES = Config.ui.sidebar.histLines
+local BOX_Y, BOX_H = Config.ui.sidebar.boxY, Config.ui.sidebar.boxH
+local COL2, COL3 = Config.ui.sidebar.col2, Config.ui.sidebar.col3
 
 function Sidebar.new(o)
     local s = setmetatable(o, Sidebar)
@@ -130,17 +131,17 @@ end
 function Sidebar:drawBackdrop()
     local x = self.x
     Pal.set(Pal.N, 0.7)
-    rect(x - 12, 0, W + 24, 1080)
+    rect(x - 12, 0, W + 24, Screen.H)
     if self.right then
 
         Pal.set(Pal.I, 0.3)
-        rect(x - 12, 0, W + 24, 1080)
+        rect(x - 12, 0, W + 24, Screen.H)
         Pal.set(Pal.I, 0.5)
-        for yy = 0, 1080, 24 do rect(x - 12, yy, W + 24, 2) end
+        for yy = 0, Screen.H, 24 do rect(x - 12, yy, W + 24, 2) end
     end
     Pal.set(self.right and Pal.I or Pal.B)
-    rect(x - 12, 0, 4, 1080)
-    rect(x + W + 8, 0, 4, 1080)
+    rect(x - 12, 0, 4, Screen.H)
+    rect(x + W + 8, 0, 4, Screen.H)
 end
 
 function Sidebar:drawPlate(statusText)
@@ -165,7 +166,9 @@ function Sidebar:drawPlate(statusText)
     local tx = self.right and (x + w - 96) or (x + 96)
     local align = self.right and "right" or "left"
     Text.print(self.name, tx, y + 22, 3, Pal.C, align, Pal.N)
-    Text.print(self.sub, tx, y + 60, 2, Pal.B, align)
+    local sub, subColor = self.sub, Pal.B
+    if self.rating then sub, subColor = "Elo " .. tostring(self.rating), Pal.C end
+    Text.print(sub, tx, y + 60, 2, subColor, align)
     if statusText and g > 0.5 then
 
         local sx = self.right and (x + 24) or (x + w - 24)
@@ -201,7 +204,7 @@ function Sidebar:drawClock()
 end
 
 function Sidebar:drawSlots(enabled)
-    for i = 1, 6 do
+    for i = 1, Config.ui.card.maxHand do
         local x, y, w, h = self:slotRect(i)
         lg.setColor(1, 1, 1, 1)
         A.ui.slot:draw(x, y, w, h, 2)

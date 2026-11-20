@@ -1,6 +1,7 @@
 local Board = require("src.chess.board")
 
 local Eval = {}
+local P = Board.P
 local abs = math.abs
 
 local RAW = {
@@ -96,21 +97,23 @@ function Eval.evaluate(b)
     for s = 1, 64 do
         local pc = p[s]
         if pc ~= 0 then
-            if pc > 0 then
-                if pc ~= 6 then score = score + PST[1][pc][s] end
-                phase = phase + PHASE[pc]
-                if pc == 3 then bishops1 = bishops1 + 1 end
-            else
-                local t = -pc
-                if t ~= 6 then score = score - PST[-1][t][s] end
-                phase = phase + PHASE[t]
-                if t == 3 then bishops2 = bishops2 + 1 end
-            end
             local e = st[ids[s]]
+            local pawned = e ~= nil and e.pawned ~= nil and e.pawned > ply
+            local t = abs(pc)
+            local et = (pawned and t ~= 6) and P or t
+            if pc > 0 then
+                if et ~= 6 then score = score + PST[1][et][s] end
+                phase = phase + PHASE[et]
+                if et == 3 then bishops1 = bishops1 + 1 end
+            else
+                if et ~= 6 then score = score - PST[-1][et][s] end
+                phase = phase + PHASE[et]
+                if et == 3 then bishops2 = bishops2 + 1 end
+            end
             if e then
                 local v = 0
                 if e.shield and e.shield > ply then v = v + 25 end
-                if e.berserk and e.berserk > ply then v = v + 60 end
+                if e.berserk and e.berserk > ply and not pawned then v = v + 60 end
                 if e.frozen and e.frozen > ply then v = v - 30 end
                 if pc > 0 then score = score + v else score = score - v end
             end

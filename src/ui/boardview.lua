@@ -1,3 +1,4 @@
+local Config = require("src.config")
 local A = require("src.assets.assets")
 local Pal = require("src.utils.palette")
 local Text = require("src.ui.text")
@@ -13,11 +14,12 @@ local Board = require("src.chess.board")
 local BV = {}
 BV.__index = BV
 
-local X0, Y0, S = 576, 152, 96
+local B = Config.ui.board
+local X0, Y0, S = B.x, B.y, B.cell
 BV.X, BV.Y, BV.S, BV.W = X0, Y0, S, S * 8
-local TRAY_X, TRAY_W = 544, 832
-local TOP_TRAY_Y, BOT_TRAY_Y, TRAY_H = 20, 960, 88
-local TRAY_STEP = 48
+local TRAY_X, TRAY_W = B.trayX, B.trayW
+local TOP_TRAY_Y, BOT_TRAY_Y, TRAY_H = B.topTrayY, B.bottomTrayY, B.trayH
+local TRAY_STEP = B.trayStep
 
 local abs, floor, sin, pi, min, max = math.abs, math.floor, math.sin, math.pi, math.min, math.max
 local random = love.math.random
@@ -40,9 +42,9 @@ function BV.new(match, opts)
     v.interactive = false
     v.sprites, v.list = {}, {}
     v.seen = {}
-    v.fx = Particles.new(900)
+    v.fx = Particles.new(B.particles)
     v.rings = {}
-    for i = 1, 24 do v.rings[i] = { on = false, x = 0, y = 0, t = 0, life = 0, r0 = 0, r1 = 0, col = Pal.C } end
+    for i = 1, B.rings do v.rings[i] = { on = false, x = 0, y = 0, t = 0, life = 0, r0 = 0, r1 = 0, col = Pal.C } end
     v.moves = {}
     v.nMoves = 0
     v.targets = {}
@@ -99,7 +101,7 @@ function BV:newSprite(id, pc, s)
         moving = false, top = false, mt = 0, dur = 0, delay = 0, arc = 0,
         state = "board", st = 0, sdelay = 0,
         squash = Spring.new(0, 520, 16), lift = Spring.new(0, 380, 26),
-        flash = 0, alpha = 1, scale = 3, rot = 0, pendingType = nil,
+        flash = 0, alpha = 1, scale = 3, rot = 0, pendingType = nil, pawned = false,
         phase = random() * pi * 2, drop = 0,
     }
     self.sprites[id] = sp
@@ -190,6 +192,10 @@ function BV:sync(info, intro)
                 if t ~= sp.t then
                     if sp.moving then sp.pendingType = t else self:promoteFx(sp, t) end
                 end
+            end
+            local pawned = b:status(id, "pawned")
+            if sp.pawned ~= pawned then
+                sp.pawned, sp.flash = pawned, 1
             end
         end
     end
@@ -681,7 +687,8 @@ function BV:drawCaptureMarks()
 end
 
 function BV:drawSprite(sp, x, y)
-    local img = A.piece[sp.side][sp.t]
+    local t = sp.pawned and Board.P or sp.t
+    local img = A.piece[sp.side][t]
     local k = sp.scale
     local q = sp.squash.x
     if q > 0.3 then q = 0.3 elseif q < -0.3 then q = -0.3 end
@@ -769,7 +776,8 @@ function BV:drawDragged()
             local gx, gy = self:squareXY(d.sq)
             Screen.flat(true)
             Pal.set(Pal.N, 0.4)
-            lg.draw(A.piece[sp.side][sp.t], gx, gy, 0, 3, 3)
+            local t = sp.pawned and Board.P or sp.t
+            lg.draw(A.piece[sp.side][t], gx, gy, 0, 3, 3)
             Screen.flat(false)
             self:drawSprite(sp, d.x - d.ox, d.y - d.oy - 10)
         end
@@ -848,8 +856,9 @@ function BV:drawTrays()
             local c = l[i]
             if not self:isFlying(c.id) then
                 local x, y = self:traySlot(side, i)
+                local t = c.pawned and Board.P or c.t
                 lg.setColor(1, 1, 1, 1)
-                lg.draw(A.piece[side][c.t], x, y, 0, 2, 2)
+                lg.draw(A.piece[side][t], x, y, 0, 2, 2)
             end
         end
     end

@@ -1,17 +1,22 @@
+local Config = require("src.config")
 local Pal = require("src.utils.palette")
 
 local Screen = {}
-Screen.W, Screen.H = 1920, 1080
+Screen.W, Screen.H = Config.screen.width, Config.screen.height
 Screen.scale, Screen.ox, Screen.oy = 1, 0, 0
 Screen.shakeX, Screen.shakeY = 0, 0
 local os_ = love.system and love.system.getOS()
 Screen.lite = os_ == "Android" or os_ == "iOS"
+Screen.chromeOn = os_ == "Windows"
+Screen.chromeH = 0
 
 local DITHER = [[
 extern Image bayer;
 extern float cell;
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     vec4 c = Texel(tex, tc) * color;
+    // Dithering only changes partially transparent pixels.
+    if (c.a >= 1.0) return vec4(c.rgb, 1.0);
     vec2 p = floor(sc / cell);
     float t = Texel(bayer, (mod(p, 4.0) + 0.5) / 4.0).r;
     if (c.a <= 0.001 || c.a < t) discard;
@@ -24,12 +29,33 @@ extern Image bayer;
 extern float cell;
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     float a = Texel(tex, tc).a * color.a;
+    // Dithering only changes partially transparent pixels.
+    if (a >= 1.0) return vec4(color.rgb, 1.0);
     vec2 p = floor(sc / cell);
     float t = Texel(bayer, (mod(p, 4.0) + 0.5) / 4.0).r;
     if (a <= 0.001 || a < t) discard;
     return vec4(color.rgb, 1.0);
 }
 ]]
+
+local CURSE_TINT = [[
+extern float curse;
+
+vec3 redGrade(vec3 c) {
+    float lum = dot(c, vec3(0.299, 0.587, 0.114));
+    vec3 red = mix(vec3(0.10, 0.004, 0.010), vec3(0.68, 0.035, 0.060), smoothstep(0.02, 0.62, lum));
+    red = mix(red, vec3(1.0, 0.52, 0.48), smoothstep(0.55, 0.92, lum));
+    red *= smoothstep(0.0, 0.07, lum);
+    return mix(c, red, curse);
+}
+
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+    vec4 c = Texel(tex, tc) * color;
+    return vec4(redGrade(c.rgb), c.a);
+}
+]]
+
+local curseOn, curseMix = false, 0
 
 function Screen.init()
     Screen.canvas = love.graphics.newCanvas(Screen.W, Screen.H, { dpiscale = 1 })
@@ -46,21 +72,34 @@ function Screen.init()
     Screen.bayer = bayer
     Screen.shader = love.graphics.newShader(DITHER)
     Screen.shader:send("bayer", bayer)
-    Screen.shader:send("cell", 2)
+    Screen.shader:send("cell", Config.ui.ditherCell)
     Screen.flatShader = love.graphics.newShader(FLAT)
     Screen.flatShader:send("bayer", bayer)
-    Screen.flatShader:send("cell", 2)
+    Screen.flatShader:send("cell", Config.ui.ditherCell)
+    Screen.tintShader = love.graphics.newShader(CURSE_TINT)
+    Screen.tintShader:send("curse", 0)
     Screen.resize(love.graphics.getDimensions())
 end
 
+function Screen.setCurse(on)
+    curseOn = on == true
+end
+
 function Screen.resize(w, h)
-    local s = math.min(w / Screen.W, h / Screen.H)
+    local chrome = 0
+    if Screen.chromeOn and love.window and love.window.getFullscreen and not love.window.getFullscreen() then
+        chrome = Config.ui.chrome.height
+    end
+    Screen.chromeH = chrome
+
+    local avail = math.max(1, h - chrome)
+    local s = math.min(w / Screen.W, avail / Screen.H)
 
     local snapped = math.floor(s * 2 + 1e-6) / 2
-    if snapped > 0 and s - snapped < 0.04 then s = snapped end
+    if snapped > 0 and s - snapped < Config.ui.snap then s = snapped end
     Screen.scale = s
     Screen.ox = math.floor((w - Screen.W * s) / 2)
-    Screen.oy = math.floor((h - Screen.H * s) / 2)
+    Screen.oy = chrome + math.floor((avail - Screen.H * s) / 2)
 end
 
 function Screen.toVirtual(x, y)
@@ -89,7 +128,12 @@ function Screen.finish()
     love.graphics.setCanvas()
     love.graphics.clear(Pal.N)
     love.graphics.setColor(1, 1, 1, 1)
+    if curseMix > 0.001 then
+        Screen.tintShader:send("curse", curseMix)
+        love.graphics.setShader(Screen.tintShader)
+    end
     love.graphics.draw(Screen.canvas, Screen.ox, Screen.oy, 0, Screen.scale, Screen.scale)
+    love.graphics.setShader()
 end
 
 local shakeT, shakeAmp = 0, 0
@@ -99,6 +143,9 @@ function Screen.shake(amp, dur)
 end
 
 function Screen.update(dt)
+    local target = curseOn and 1 or 0
+    curseMix = curseMix + (target - curseMix) * math.min(1, dt * 6)
+    if math.abs(target - curseMix) < 0.001 then curseMix = target end
     if shakeT > 0 then
         shakeT = shakeT - dt
         local a = shakeAmp * math.max(0, shakeT) * 4

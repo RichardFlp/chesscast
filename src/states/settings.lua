@@ -1,3 +1,4 @@
+local Config = require("src.config")
 local Screen = require("src.utils.screen")
 local M = require("src.states.manager")
 local App = require("src.app")
@@ -20,7 +21,8 @@ end
 
 function Settings:build()
     local s = App.settings
-    local x, w, y, gap = 400, 1120, 230, 78
+    local form = Config.ui.settings
+    local x, w, y, gap = form.x, form.w, form.y, form.gap
     self.items = {
         W.Slider.new { x = x, y = y, w = w, label = "MASTER VOLUME", value = s.master,
             onChange = function(v) s.master = v; App.applyAudio() end },
@@ -35,7 +37,7 @@ function Settings:build()
             index = s.resolution, onChange = function(i) s.resolution = i; App.applyWindow() end },
         W.Selector.new { x = x, y = y + gap * 5 + 44, w = w, label = "ANIMATIONS", options = Save.ANIM,
             index = s.anim, onChange = function(i) s.anim = i end },
-        Button.new { x = 960 - 200, y = 846, w = 400, h = 76, label = "BACK", backSound = true,
+        Button.new { x = Screen.W / 2 - 200, y = form.backY, w = 400, h = 76, label = "BACK", backSound = true,
             onClick = function() self:back() end },
     }
     self.focus = W.Focus.new(self.items)
@@ -66,14 +68,16 @@ function Settings:update(dt, mx, my)
 end
 
 function Settings:draw()
-    BG.draw(0.35)
-    Frame.panel(340, 150, 1240, 810, "SETTINGS")
-    Text.print("AUDIO", 400, 200, 2, Pal.B, "left")
-    Frame.divider(400, 466, 1120)
-    Text.print("DISPLAY", 400, 496, 2, Pal.B, "left")
+    if self.overlay then self.overlay() else BG.draw(Config.ui.background.menuDim) end
+    local f = Config.ui.frame
+    Frame.panel(f.x, f.y, f.w, f.h, "SETTINGS")
+    local form = Config.ui.settings
+    Text.print("AUDIO", form.x, form.audioY, 2, Pal.B, "left")
+    Frame.divider(form.x, form.dividerY, form.w)
+    Text.print("DISPLAY", form.x, form.displayY, 2, Pal.B, "left")
     for _, it in ipairs(self.items) do it:draw() end
     if App.settings.fullscreen then
-        Text.print("WINDOW SIZE APPLIES IN WINDOWED MODE", 960, 816, 2, Pal.I, "center")
+        Text.print("WINDOW SIZE APPLIES IN WINDOWED MODE", Screen.W / 2, form.hintY, 2, Pal.I, "center")
     end
 end
 

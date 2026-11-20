@@ -1,5 +1,7 @@
+local Config = require("src.config")
 local NineSlice = require("src.ui.nineslice")
 local Pal = require("src.utils.palette")
+local Defs = require("src.cards.defs")
 
 local A = {}
 
@@ -23,55 +25,47 @@ function A.image(path, w, h)
     return img
 end
 
-local SLICES = {
-    panel_large = { 12, 12, 12, 12 },
-    panel_small = { 8, 8, 8, 8 },
-    button_primary = { 4, 4, 4, 5 },
-    button_secondary = { 4, 4, 4, 5 },
-    button_disabled = { 4, 4, 4, 5 },
-    slot = { 6, 6, 6, 6 },
-    slot_selected = { 6, 6, 6, 6 },
-    tooltip = { 6, 6, 6, 6 },
-    dialogue = { 12, 12, 12, 12 },
-    divider_h = { 8, 0, 8, 0 },
-    divider_v = { 0, 8, 0, 8 },
-}
+local SLICES = Config.assets.slices
 
-A.CARD_SLUGS = {
-    "teleport", "swap", "magnetic_pull", "reverse_gravity", "rooks_gambit", "double_strike",
-    "shield", "dispel", "sanctuary", "fog_of_war", "checkmates_grace", "counterspell",
-    "sacrifice", "resurrection", "berserk", "blood_pact", "rebirth", "last_stand",
-    "time_rewind", "freeze", "haste", "en_passant", "temporal_echo", "meteor",
-}
+A.CARD_SLUGS = {}
+for _, def in ipairs(Defs.list) do
+    A.CARD_SLUGS[#A.CARD_SLUGS + 1] = def.slug
+end
 
-local PIECES = { "pawn", "knight", "bishop", "rook", "queen", "king" }
+local PIECES = Config.assets.pieceNames
+local ASSETS = Config.assets
+local EXT = ASSETS.imageExt
+local UI_DIR, PIECE_DIR, CARD_DIR = ASSETS.ui, ASSETS.pieces, ASSETS.cards
+local SIZES = ASSETS.imageSizes
 
-A.FONT_SIZES = { [1] = 10, [2] = 20, [3] = 31, [4] = 41, [6] = 61, [8] = 82 }
+A.FONT_SIZES = Config.ui.fontSizes
 
 function A.load()
     love.graphics.setDefaultFilter("nearest", "nearest")
     A.ui = {}
     for name, m in pairs(SLICES) do
-        local img = A.image("assets/ui/" .. name .. ".png", 24, 24)
+        local img = A.image(UI_DIR .. name .. EXT, SIZES.ui, SIZES.ui)
         A.ui[name] = NineSlice.new(img, m[1], m[2], m[3], m[4])
     end
-    A.bg = A.image("assets/ui/bg_texture.png", 16, 16)
+    A.bg = A.image(UI_DIR .. "bg_texture" .. EXT, SIZES.bg, SIZES.bg)
     A.bg:setWrap("repeat", "repeat")
 
     A.piece = { [1] = {}, [-1] = {} }
     for t, name in ipairs(PIECES) do
-        A.piece[1][t] = A.image("assets/pieces/white_" .. name .. ".png", 32, 32)
-        A.piece[-1][t] = A.image("assets/pieces/black_" .. name .. ".png", 32, 32)
+        local white = PIECE_DIR .. "white_" .. name .. EXT
+        local black = PIECE_DIR .. "black_" .. name .. EXT
+        A.piece[1][t] = A.image(white, SIZES.piece, SIZES.piece)
+        A.piece[-1][t] = A.image(black, SIZES.piece, SIZES.piece)
     end
 
     A.card = {}
     for _, slug in ipairs(A.CARD_SLUGS) do
-        A.card[slug] = A.image("assets/cards/" .. slug .. ".png", 64, 96)
+        A.card[slug] = A.image(CARD_DIR .. slug .. EXT, SIZES.cardW, SIZES.cardH)
     end
 
     A.font = {}
     for k, size in pairs(A.FONT_SIZES) do
-        local ok, f = pcall(love.graphics.newFont, "assets/fonts/PixelEmulator-xq08.ttf", size, "mono", 1)
+        local ok, f = pcall(love.graphics.newFont, Config.assets.font, size, "mono", 1)
         if not ok then f = love.graphics.newFont(size) end
         f:setFilter("nearest", "nearest")
         A.font[k] = f
@@ -80,6 +74,7 @@ function A.load()
     local px = love.image.newImageData(1, 1)
     px:setPixel(0, 0, 1, 1, 1, 1)
     A.pixel = love.graphics.newImage(px)
+    A.pixel:setFilter("nearest", "nearest")
 end
 
 return A
